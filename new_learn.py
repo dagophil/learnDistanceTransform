@@ -72,7 +72,7 @@ def TESTHYSTERESIS(lp_data):
     """
     raw = lp_data.get_raw_train()
     hog1 = lp_data.get_feature_train(8)
-    hys1 = vigra.filters.hysteresisThreshold(hog1, 0.4, 0.01).astype(numpy.float32)
+    hys1 = vigra.filters.hysteresisThreshold(hog1, 0.4, 0.0125).astype(numpy.float32)
 
     sl = numpy.index_exp[:, :, 10]
     show_plots((1, 3), (raw[sl], hog1[sl], hys1[sl]))

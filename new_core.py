@@ -26,6 +26,16 @@ class LPData(object):
         """
         return - numpy.log(data) / lam
 
+    @staticmethod
+    def normalize(feat):
+        """Normalizes the data between 0 and 1.
+
+        :param feat: some data
+        :return: the normalized data
+        """
+        feat = feat - numpy.min(feat)
+        return feat / numpy.max(feat)
+
     def __init__(self, cache_folder):
         self.cache_folder = cache_folder
         if not os.path.isdir(cache_folder):
@@ -64,6 +74,27 @@ class LPData(object):
         :return: raw training data
         """
         return vigra.readHDF5(self.raw_train_path, self.raw_train_key).astype(numpy.float32)
+
+    def get_raw_test(self):
+        """Returns the raw test data.
+
+        :return: raw test data
+        """
+        return vigra.readHDF5(self.raw_test_path, self.raw_test_key).astype(numpy.float32)
+
+    def get_gt_train(self):
+        """Returns the ground truth training data.
+
+        :return: ground truth training data
+        """
+        return vigra.readHDF5(self.gt_train_path, self.gt_train_key).astype(numpy.uint32)
+
+    def get_gt_test(self):
+        """Returns the ground truth test data.
+
+        :return: ground truth test data
+        """
+        return vigra.readHDF5(self.gt_test_path, self.gt_test_key).astype(numpy.uint32)
 
     def get_feature_train(self, feat_id):
         """Returns the training feature with the given id.
@@ -111,7 +142,7 @@ class LPData(object):
         self.gt_test_path = gt_path
         self.gt_test_key = gt_key
 
-    def compute_and_save_features(self, feature_list, target="train"):
+    def compute_and_save_features(self, feature_list, target="train", normalize=True):
         """Compute the features from the list on training or test data and saves them to the cache folder.
 
         :param feature_list: List with function calls of features. Each list item must be
@@ -121,10 +152,10 @@ class LPData(object):
         """
         # Read the data.
         if target == "train":
-            data = vigra.readHDF5(self.raw_train_path, self.raw_train_key).astype(numpy.float32)
+            data = self.get_raw_train()
             prefix = "train_"
         elif target == "test":
-            data = vigra.readHDF5(self.raw_test_path, self.raw_test_key).astype(numpy.float32)
+            data = self.get_raw_test()
             prefix = "test_"
         else:
             raise Exception('Parameter "target" must be "train" or "test".')
@@ -142,10 +173,14 @@ class LPData(object):
             # Save the feature.
             if feat_item[0] == 1:
                 file_names.append(os.path.join(self.cache_folder, prefix + str(len(file_names)).zfill(zfill) + ".h5"))
+                if normalize:
+                    feat = LPData.normalize(feat)
                 vigra.writeHDF5(feat, file_names[-1], self.feat_h5_key, compression="lzf")
             else:
                 for k in range(feat_item[0]):
                     file_names.append(os.path.join(self.cache_folder, prefix + str(len(file_names)).zfill(zfill) + ".h5"))
+                    if normalize:
+                        feat[..., -1] = LPData.normalize(feat[..., -1])
                     vigra.writeHDF5(feat[..., -1], file_names[-1], self.feat_h5_key, compression="lzf")
 
         if target == "train":
@@ -190,11 +225,11 @@ class LPData(object):
         """
         # Read the data.
         if target == "train":
-            data = vigra.readHDF5(self.gt_train_path, self.gt_train_key).astype(numpy.uint32)
+            data = self.get_gt_train()
             file_name = os.path.join(self.cache_folder, "dists_train.h5")
             self.dists_train_path = file_name
         elif target == "test":
-            data = vigra.readHDF5(self.gt_test_path, self.gt_test_key).astype(numpy.uint32)
+            data = self.get_gt_test()
             file_name = os.path.join(self.cache_folder, "dists_test.h5")
             self.dists_test_path = file_name
         else:
