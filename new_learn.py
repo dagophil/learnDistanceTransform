@@ -2,6 +2,9 @@ import sys
 import new_core as core
 import skneuro.blockwise_filters as filters
 import argparse
+import vigra
+import numpy
+import matplotlib.pyplot as plt
 
 
 def create_dummy_feature_list():
@@ -41,6 +44,26 @@ def data_names_dataset02_test():
            "/home/philip/data/dataset02_100/test/gt_reg.h5", "gt_reg"
 
 
+def show_plots(shape, plots):
+    """Create a plot of the given shape and show the plots.
+
+    :param shape: 2-tuple of integers
+    :param plots: iterable of plots
+    """
+    assert 2 == len(shape)
+    assert shape[0]*shape[1] == len(plots)
+    fig, rows = plt.subplots(*shape)
+    for i, p in enumerate(plots):
+        ind0, ind1 = numpy.unravel_index(i, shape)
+        if shape[0] == 1:
+            rows[ind1].imshow(p)
+        elif shape[1] == 1:
+            rows[ind0].imshow(p)
+        else:
+            rows[ind0][ind1].imshow(p)
+    plt.show()
+
+
 def TESTHYSTERESIS(lp_data):
     """
 
@@ -48,7 +71,11 @@ def TESTHYSTERESIS(lp_data):
     :return:
     """
     raw = lp_data.get_raw_train()
-    print raw.shape
+    hog1 = lp_data.get_feature_train(8)
+    hys1 = vigra.filters.hysteresisThreshold(hog1, 0.4, 0.01).astype(numpy.float32)
+
+    sl = numpy.index_exp[:, :, 10]
+    show_plots((1, 3), (raw[sl], hog1[sl], hys1[sl]))
 
 
 def process_command_line():

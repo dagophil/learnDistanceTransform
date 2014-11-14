@@ -63,7 +63,23 @@ class LPData(object):
 
         :return: raw training data
         """
-        return vigra.readHDF5(self.raw_train_path, self.raw_train_key)
+        return vigra.readHDF5(self.raw_train_path, self.raw_train_key).astype(numpy.float32)
+
+    def get_feature_train(self, feat_id):
+        """Returns the training feature with the given id.
+
+        :param feat_id: id of the feature
+        :return: the requested feature
+        """
+        return vigra.readHDF5(self.feature_file_names_train[feat_id], self.feat_h5_key).astype(numpy.float32)
+
+    def get_feature_test(self, feat_id):
+        """Returns the test feature with the given id.
+
+        :param feat_id: id of the feature
+        :return: the requested feature
+        """
+        return vigra.readHDF5(self.feature_file_names_test[feat_id], self.feat_h5_key).astype(numpy.float32)
 
     def set_train(self, raw_path, raw_key, gt_path, gt_key):
         """Set path and h5 key for raw and ground truth for training data.
@@ -105,10 +121,10 @@ class LPData(object):
         """
         # Read the data.
         if target == "train":
-            data = vigra.readHDF5(self.raw_train_path, self.raw_train_key)
+            data = vigra.readHDF5(self.raw_train_path, self.raw_train_key).astype(numpy.float32)
             prefix = "train_"
         elif target == "test":
-            data = vigra.readHDF5(self.raw_test_path, self.raw_test_key)
+            data = vigra.readHDF5(self.raw_test_path, self.raw_test_key).astype(numpy.float32)
             prefix = "test_"
         else:
             raise Exception('Parameter "target" must be "train" or "test".')
@@ -174,11 +190,11 @@ class LPData(object):
         """
         # Read the data.
         if target == "train":
-            data = vigra.readHDF5(self.gt_train_path, self.gt_train_key)
+            data = vigra.readHDF5(self.gt_train_path, self.gt_train_key).astype(numpy.uint32)
             file_name = os.path.join(self.cache_folder, "dists_train.h5")
             self.dists_train_path = file_name
         elif target == "test":
-            data = vigra.readHDF5(self.gt_test_path, self.gt_test_key)
+            data = vigra.readHDF5(self.gt_test_path, self.gt_test_key).astype(numpy.uint32)
             file_name = os.path.join(self.cache_folder, "dists_test.h5")
             self.dists_test_path = file_name
         else:
