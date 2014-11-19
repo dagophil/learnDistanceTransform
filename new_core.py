@@ -2,6 +2,8 @@ import os
 import vigra
 import numpy
 import skneuro.learning
+from sklearn.ensemble import RandomForestRegressor
+import logging as log
 
 
 class LPData(object):
@@ -58,6 +60,8 @@ class LPData(object):
 
         self.feature_file_names_train = None
         self.feature_file_names_test = None
+
+        self.rf_regressor = None
 
     def clean_cache_folder(self):
         """Delete all files in the cache folder.
@@ -158,7 +162,7 @@ class LPData(object):
             data = self.get_raw_test()
             prefix = "test_"
         else:
-            raise Exception('Parameter "target" must be "train" or "test".')
+            raise Exception('LPData.compute_and_save_features(): Parameter "target" must be either "train" or "test".')
 
         # Find the zero fill in for the file names.
         num_features = sum([p[0] for p in feature_list])
@@ -201,7 +205,7 @@ class LPData(object):
         elif target == "test":
             prefix = "test_"
         else:
-            raise Exception('Parameter "target" must be "train" or "test".')
+            raise Exception('LPData.load_features(): Parameter "target" must be either "train" or "test".')
 
         # Find the zero fill in for the file names.
         num_features = sum([p[0] for p in feature_list])
@@ -215,6 +219,59 @@ class LPData(object):
             self.feature_file_names_train = file_names
         elif target == "test":
             self.feature_file_names_test = file_names
+
+    def get_data_x(self, data_name="train"):
+        """Returns the desired data as a ready-to-use n x d sample (n instances with d features).
+
+        :param data_name: name of the data, either "train" or "test"
+        :return: data
+        """
+        if not data_name in ["train", "test"]:
+            raise Exception('LPData.get_data_x(): Parameter data_name must be either "train" or "test".')
+        raise NotImplementedError
+
+    def get_data_y(self, data_name="train", data_type="gt"):
+        """Returns the desired ground truth labels.
+
+        :param data_name: name of the data, either "train" or "test"
+        :param data_type: type of the ground truth, either "gt" or "dists"
+        :return:
+        """
+        if not data_name in ["train", "test"]:
+            raise Exception('LPData.get_data_y(): Parameter data_name must be either "train" or "test".')
+        if not data_type in ["gt", "dists"]:
+            raise Exception('LPData.get_data_y(): Parameter data_type must be either "gt" or "dists".')
+        raise NotImplementedError
+
+    def get_train_x(self):
+        """Return the training data as a ready-to-use n x d sample (n instances with d features).
+
+        :return: training data
+        """
+        return self.get_data_x("train")
+
+    def get_train_y(self, data="gt"):
+        """Return the training labels.
+
+        :param data: which ground truth shall be returned, either "gt" or "dists"
+        :return: training labels
+        """
+        return self.get_data_y("train", data)
+
+    def get_test_x(self):
+        """Return the test data as a ready-to-use n x d sample (n instances with d features).
+
+        :return: test data
+        """
+        return self.get_data_x("test")
+
+    def get_test_y(self, data="gt"):
+        """Return the test labels.
+
+        :param data: which ground truth shall be returned, either "gt" or "dists"
+        :return: test labels
+        """
+        return self.get_data_y("test", data)
 
     def compute_distance_transform_on_gt(self, target="train"):
         """
@@ -233,7 +290,7 @@ class LPData(object):
             file_name = os.path.join(self.cache_folder, "dists_test.h5")
             self.dists_test_path = file_name
         else:
-            raise Exception('Parameter "target" must be "train" or "test".')
+            raise Exception('LPData.compute_distance_transform_on_gt(): Parameter "target" must be "train" or "test".')
 
         # Compute the edge image and the distance transform.
         edges = skneuro.learning.regionToEdgeGt(data)
@@ -254,4 +311,30 @@ class LPData(object):
         elif target == "test":
             self.dists_test_path = os.path.join(self.cache_folder, "dists_test.h5")
         else:
-            raise Exception('Parameter "target" must be "train" or "test".')
+            raise Exception('LPData.load_dists(): Parameter "target" must be "train" or "test".')
+
+    def learn(self, gt="gt", n_estimators=10, n_jobs=1):
+        """Learn the training data.
+
+        :param gt: which ground truth shall be used, either "gt" or "dists"
+        :param n_estimators: number of estimators for the random forest regressor
+        :param n_jobs: number of jobs that will be used in the random forest regressor
+        """
+        if not gt in ["gt", "dists"]:
+            raise Exception('LPData.learn_dists(): Parameter gt must be either "gt" or "dists".')
+
+        self.rf_regressor = RandomForestRegressor(n_estimators=n_estimators, n_jobs=n_jobs)
+        log.info("Fitting the random forest regressor.")
+        self.rf_regressor.fit(self.get_train_x(), self.get_train_y(gt))
+        log.info("... done")
+
+    def predict(self):
+        """Predict the test data.
+
+        :return: predicted labels of the test data
+        """
+        # TODO: Decide whether the output shall be saved to a h5 file instead of being returned.
+        log.info("Predicting.")
+        pred = self.rf_regressor.predict(self.get_test_x())
+        log.info("... done")
+        return pred

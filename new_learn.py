@@ -5,6 +5,7 @@ import argparse
 import vigra
 import numpy
 import matplotlib.pyplot as plt
+import logging as log
 
 
 def create_dummy_feature_list():
@@ -85,6 +86,9 @@ def process_command_line():
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("workflow", type=str, nargs="+", help="names of the workflows that will be executed")
     parser.add_argument("-c", "--cache", type=str, default="cache", help="name of the cache folder")
+    parser.add_argument("--jobs", type=int, default=1, help="number of cores that can be used")
+    parser.add_argument("--estimators", type=int, default=10, help="number of estimators for random forest regressor")
+    parser.add_argument("-v", "--verbose", action="store_true", default=False, help="print verbose output")
     return parser.parse_args()
 
 
@@ -93,6 +97,10 @@ def main():
     """
     # Read command line arguments.
     args = process_command_line()
+    if args.verbose:
+        log.basicConfig(format="%(levelname)s: %(message)s", level=log.DEBUG)
+    else:
+        log.basicConfig(format="%(levelname)s: %(message)s")
 
     # ==========================
     # =====   Parameters   =====
@@ -134,7 +142,12 @@ def main():
             lp_data.load_features(feature_list, "test")
             lp_data.load_dists("train")
             lp_data.load_dists("test")
+        elif w == "learn_dists":
+            lp_data.learn(gt="dists", n_estimators=args.estimators, n_jobs=args.jobs)
+        elif w == "predict":
+            lp_data.predict()
         elif w == "hysteresis":
+            print "TODO: Is this necessary?"
             TESTHYSTERESIS(lp_data)
         else:
             raise Exception("Unknown workflow: %s" % w)
