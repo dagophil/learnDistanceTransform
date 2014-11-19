@@ -79,6 +79,19 @@ def TESTHYSTERESIS(lp_data):
     show_plots((1, 3), (raw[sl], hog1[sl], hys1[sl]))
 
 
+def TESTCOMPARE(lp_data):
+    """
+
+    :param lp_data:
+    :return:
+    """
+    pred = vigra.readHDF5("cache/pred.h5", "pred").reshape((100, 100, 100))
+    dists_test = lp_data.get_data_y("test", "dists").reshape((100, 100, 100))
+
+    sl = numpy.index_exp[:, :, 50]
+    show_plots((1, 2), (dists_test[sl], pred[sl]))
+
+
 def process_command_line():
     """Parse the command line arguments.
     """
@@ -117,6 +130,14 @@ def main():
     lp_data.set_train(raw_train_path, raw_train_key, gt_train_path, gt_train_key)
     lp_data.set_test(raw_test_path, raw_test_key, gt_test_path, gt_test_key)
 
+    # Check beforehand if the workflow arguments are usable.
+    allowed_workflows = ["clean", "compute_train", "compute_test", "compute_dists_train", "compute_dists_test",
+                         "load_train", "load_test", "load_dists_train", "load_dists_test", "load_all",
+                         "learn_dists", "predict", "TESThysteresis", "TESTcompare"]
+    for w in args.workflow:
+        if not w in allowed_workflows:
+            raise Exception("Unknown workflow: %s" % w)
+
     # Parse the command line arguments and do the according stuff.
     for w in args.workflow:
         if w == "clean":
@@ -145,10 +166,13 @@ def main():
         elif w == "learn_dists":
             lp_data.learn(gt="dists", n_estimators=args.estimators, n_jobs=args.jobs)
         elif w == "predict":
-            lp_data.predict()
-        elif w == "hysteresis":
-            print "TODO: Is this necessary?"
+            lp_data.predict(file_name="cache/pred.h5")
+        elif w == "TESThysteresis":
+            # TODO: Is this workflow still needed?
             TESTHYSTERESIS(lp_data)
+        elif w == "TESTcompare":
+            # TODO: Is this workflow still needed?
+            TESTCOMPARE(lp_data)
         else:
             raise Exception("Unknown workflow: %s" % w)
 

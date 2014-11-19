@@ -45,6 +45,7 @@ class LPData(object):
 
         self.feat_h5_key = "feat"
         self.dists_h5_key = "dists"
+        self.pred_h5_key = "pred"
 
         self.raw_train_path = None
         self.raw_train_key = None
@@ -228,7 +229,25 @@ class LPData(object):
         """
         if not data_name in ["train", "test"]:
             raise Exception('LPData.get_data_x(): Parameter data_name must be either "train" or "test".')
-        raise NotImplementedError
+
+        if data_name == "train":
+            file_names = self.feature_file_names_train
+        elif data_name == "test":
+            file_names = self.feature_file_names_test
+
+        if len(file_names) == 0:
+            raise Exception("LPData.get_data_x(): There is no data that can be returned.")
+
+        # Load the first feature to get the number of instances.
+        d = vigra.readHDF5(file_names[0], self.feat_h5_key).flatten()
+        data = numpy.zeros((d.shape[0], len(file_names)))
+        data[:, 0] = d
+
+        # Load the other features.
+        for i, file_name in enumerate(file_names[1:]):
+            data[:, i+1] = vigra.readHDF5(file_name, self.feat_h5_key).flatten()
+
+        return data
 
     def get_data_y(self, data_name="train", data_type="gt"):
         """Returns the desired ground truth labels.
@@ -241,7 +260,17 @@ class LPData(object):
             raise Exception('LPData.get_data_y(): Parameter data_name must be either "train" or "test".')
         if not data_type in ["gt", "dists"]:
             raise Exception('LPData.get_data_y(): Parameter data_type must be either "gt" or "dists".')
-        raise NotImplementedError
+
+        # Load the desired data.
+        if data_name == "train" and data_type == "gt":
+            return vigra.readHDF5(self.gt_train_path, self.gt_train_key).flatten()
+        if data_name == "train" and data_type == "dists":
+            return vigra.readHDF5(self.dists_train_path, self.dists_h5_key).flatten()
+        if data_name == "test" and data_type == "gt":
+            return vigra.readHDF5(self.gt_test_path, self.gt_test_key).flatten()
+        if data_name == "test" and data_type == "dists":
+            return vigra.readHDF5(self.dists_test_path, self.dists_h5_key).flatten()
+        raise Exception("LPData.get_data_y(): Congratulations, you have reached unreachable code.")
 
     def get_train_x(self):
         """Return the training data as a ready-to-use n x d sample (n instances with d features).
@@ -324,17 +353,22 @@ class LPData(object):
             raise Exception('LPData.learn_dists(): Parameter gt must be either "gt" or "dists".')
 
         self.rf_regressor = RandomForestRegressor(n_estimators=n_estimators, n_jobs=n_jobs)
-        log.info("Fitting the random forest regressor.")
+        log.info("Fitting the random forest regressor with %d estimators and %d cores." % (n_estimators, n_jobs))
         self.rf_regressor.fit(self.get_train_x(), self.get_train_y(gt))
-        log.info("... done")
+        log.info("... done with fitting.")
 
-    def predict(self):
-        """Predict the test data.
+    def predict(self, file_name=None):
+        """Predict the test data and [optional] save the predicted labels.
 
+        :param file_name: output file name, if file_name is None, no output file will be produced
         :return: predicted labels of the test data
         """
-        # TODO: Decide whether the output shall be saved to a h5 file instead of being returned.
         log.info("Predicting.")
         pred = self.rf_regressor.predict(self.get_test_x())
-        log.info("... done")
+        log.info("... done with predicting.")
+
+        # Save the output.
+        if not file_name is None:
+            vigra.writeHDF5(pred, file_name, self.pred_h5_key)
+
         return pred
