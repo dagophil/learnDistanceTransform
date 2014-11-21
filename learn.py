@@ -1,245 +1,182 @@
+import sys
+import core
+import skneuro.blockwise_filters as filters
+import argparse
 import vigra
 import numpy
-from sklearn.ensemble import RandomForestRegressor
-import core
-import random
-import sys
-import os
 import matplotlib.pyplot as plt
+import logging as log
+import data
 
 
-def e_power(data, lam):
-    """Apply exp(-lam * data) to the given data.
+def create_dummy_feature_list():
+    """Generate a list with function calls of features that shall be computed.
 
-    :param data: numpy array
-    :param lam: exponent
-    :return: exp(-lam * data)
+    Each list item is of the form [number_of_features, function_name, function_args].
+    :return: List with features.
     """
-    return numpy.exp(1)**(-lam*data)
+    return [[1, filters.blockwiseGaussianSmoothing, 1.0],
+            [1, filters.blockwiseGaussianSmoothing, 2.0],
+            [1, filters.blockwiseGaussianSmoothing, 4.0],
+            [1, filters.blockwiseGaussianGradientMagnitude, 1.0],
+            [1, filters.blockwiseGaussianGradientMagnitude, 2.0],
+            [1, filters.blockwiseGaussianGradientMagnitude, 4.0],
+            [3, filters.blockwiseHessianOfGaussianSortedEigenvalues, 1.0],
+            [3, filters.blockwiseHessianOfGaussianSortedEigenvalues, 2.0],
+            [3, filters.blockwiseHessianOfGaussianSortedEigenvalues, 4.0],
+            [1, filters.blockwiseLaplacianOfGaussian, 1.0],
+            [1, filters.blockwiseLaplacianOfGaussian, 2.0],
+            [1, filters.blockwiseLaplacianOfGaussian, 4.0],
+            [3, filters.blockwiseStructureTensorSortedEigenvalues, 0.5, 1.0],
+            [3, filters.blockwiseStructureTensorSortedEigenvalues, 1.0, 2.0],
+            [3, filters.blockwiseStructureTensorSortedEigenvalues, 2.0, 4.0]]
 
 
-def e_power_inv(data, lam):
-    """Apply log(data) / (-lam) to the given data. This is the inverse function to e_power(data, lam).
+def show_plots(shape, plots, interpolation="bilinear"):
+    """Create a plot of the given shape and show the plots.
 
-    :param data: numpy array
-    :param lam: exponent
-    :return: log(data) / (-lam)
+    :param shape: 2-tuple of integers
+    :param plots: iterable of plots
+    :param interpolation: interpolation argument to imshow
     """
-    return numpy.log(data) / (-lam)
+    assert 2 == len(shape)
+    assert shape[0]*shape[1] == len(plots)
+    fig, rows = plt.subplots(*shape)
+    for i, p in enumerate(plots):
+        ind0, ind1 = numpy.unravel_index(i, shape)
+        if shape[0] == 1:
+            rows[ind1].imshow(p, interpolation=interpolation)
+        elif shape[1] == 1:
+            rows[ind0].imshow(p, interpolation=interpolation)
+        else:
+            rows[ind0][ind1].imshow(p, interpolation=interpolation)
+    plt.show()
 
 
-def learn_and_predict(train_x, train_y, test_x, n_estimators=10, n_jobs=6):
-    """Train a RandomForestRegressor and predict some data.
-
-    :param train_x: training features
-    :param train_y: training classes
-    :param test_x: test features
-    :param n_estimators: number of estimators
-    :param n_jobs: number of threads
-    :return: predicted test classes
-    """
-    rf = RandomForestRegressor(n_estimators=n_estimators, n_jobs=n_jobs)
-    rf.fit(train_x, train_y)
-    return rf.predict(test_x)
-
-
-def clean_features(prefixes, prefixes_test):
-    """Deletes the previously created feature files.
-
-    :param prefixes: file prefix of training features
-    :param prefixes_test: file prefix of test features
-    """
-    for prefix in [prefixes, prefixes_test]:
-        folder, pref = os.path.split(prefix)
-        for dir_name, subdir_list, file_list in os.walk(folder):
-            for f in file_list:
-                if f.startswith(pref):
-                    os.remove(os.path.join(dir_name, f))
-
-
-def random_train_predict_loop(filename_prefix, filename_prefix_test, steps, train_rate, test_rate, h5_key):
+def TESTHYSTERESIS(lp_data):
     """
 
+    :param lp_data:
     :return:
     """
-    # Load the data and the features.
-    print "Loading data."
-    raw, gt, raw_test, gt_test = core.load_data()
-    del gt
-    del gt_test
-    print "Loading the features."
-    feature_list = core.generate_feature_list(raw)
-    raw_size = raw.size
-    raw_shape = raw.shape
-    del raw
-    features = core.generate_feature_filenames(feature_list, filename_prefix, special="train")
-    del feature_list
-    feature_list_test = core.generate_feature_list(raw_test)
-    raw_test_size = raw_test.size
-    raw_test_shape = raw_test.shape
-    del raw_test
-    features_test = core.generate_feature_filenames(feature_list_test, filename_prefix_test, special="test")
-    del feature_list_test
+    raw = lp_data.get_raw_train()
+    hog1 = lp_data.get_feature_train(8)
+    hys1 = vigra.filters.hysteresisThreshold(hog1, 0.4, 0.0125).astype(numpy.float32)
 
-    # Do the train-predict loop with a random sample of the data.
-    for i in range(steps):
-        print "Taking random sample of training data (step %d of %d)" % (i+1, steps)
-
-        # Training:
-        print "Computing sample indices (training)."
-        sample_count = int(numpy.ceil(raw_size * train_rate))
-        sample_indices = random.sample(range(raw_size), sample_count)
-        print "Loading sub samples for training features."
-        features_sub = core.load_sub_samples(features, h5_key, sample_indices)
-        print "Getting distances for training sub samples."
-        dists_sub = vigra.readHDF5(filename_prefix + "dists.h5", "dists").flatten()[sample_indices]
-        # dists_sub = dists.reshape((dists.size,))[sample_indices]
-        del sample_indices
-
-        # Test:
-        print "Computing sample indices (test)."
-        sample_count_test = int(numpy.ceil(raw_test_size * test_rate))
-        sample_indices_test = random.sample(range(raw_test_size), sample_count_test)
-        print "Loading sub samples for test features."
-        features_sub_test = core.load_sub_samples(features_test, h5_key, sample_indices_test)
-        print "Getting distances for test sub samples."
-        # dists_sub_test = dists_test.reshape((dists_test.size,))[sample_indices_test]
-        # dists_sub_test = vigra.readHDF5(filename_prefix_test + "dists.h5", "dists").flatten()[sample_indices_test]
-        del sample_indices_test
-
-        # Learn and predict the distances.
-        print "Learning and predicting distances."
-        dists_01 = e_power(dists_sub, lam=lam)
-        pred_dists_01 = learn_and_predict(features_sub, dists_01.flatten(), features_sub_test).reshape(raw_test_shape)
-        pred_dists_01 = e_power_inv(pred_dists_01, lam=lam)
-        vigra.writeHDF5(pred_dists_01, "pred_dists_%s.h5" % str(i).zfill(2), "pred", compression="lzf")
+    sl = numpy.index_exp[:, :, 10]
+    show_plots((1, 3), (raw[sl], hog1[sl], hys1[sl]))
 
 
-if __name__ == "__main__":
+def TESTCOMPARE(lp_data):
+    """
+
+    :param lp_data:
+    :return:
+    """
+    sh = (100, 100, 100)
+    dists_test = lp_data.get_data_y("test", "dists").reshape(sh)
+
+    dists_test[dists_test > 5] = 5
+
+    pred_inv = vigra.readHDF5("cache/pred_cap_lam_01.h5", "pred").reshape(sh)
+    pred_inv_round = numpy.round(pred_inv)
+
+    sl = numpy.index_exp[:, :, 50]
+    show_plots((1, 3), (dists_test[sl], pred_inv[sl], pred_inv_round[sl]), interpolation="nearest")
+
+
+def process_command_line():
+    """Parse the command line arguments.
+    """
+    parser = argparse.ArgumentParser(description="There is no description.",
+                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument("workflow", type=str, nargs="+", help="names of the workflows that will be executed")
+    parser.add_argument("-c", "--cache", type=str, default="cache", help="name of the cache folder")
+    parser.add_argument("--jobs", type=int, default=1, help="number of cores that can be used")
+    parser.add_argument("--estimators", type=int, default=10, help="number of estimators for random forest regressor")
+    parser.add_argument("-v", "--verbose", action="store_true", default=False, help="print verbose output")
+    parser.add_argument("--cap", type=float, default=0,
+                        help="maximum value of distance transform (ignored if 0), all larger values will be set to this")
+    return parser.parse_args()
+
+
+def main():
+    """
+    """
+    # Read command line arguments.
+    args = process_command_line()
+    if args.verbose:
+        log.basicConfig(format="%(levelname)s: %(message)s", level=log.DEBUG)
+    else:
+        log.basicConfig(format="%(levelname)s: %(message)s")
+
     # ==========================
     # =====   Parameters   =====
     # ==========================
-    steps = 3
-    # filename_prefix = "/media/philip/AZURA/TEMP/features_train/feature_"
-    # filename_prefix_test = "/media/philip/AZURA/TEMP/features_test/feature_"
-    filename_prefix = "features_train/feature_"
-    filename_prefix_test = "features_test/feature_"
-    h5_key = "feat"
-    train_rate = 0.1
-    test_rate = 0.04
-    lam = 0.1
+    raw_train_path, raw_train_key, gt_train_path, gt_train_key = data.data_names_dataset02_training()
+    raw_test_path, raw_test_key, gt_test_path, gt_test_key = data.data_names_dataset02_test()
+    feature_list = create_dummy_feature_list()
     # ==========================
     # ==========================
     # ==========================
 
-    if len(sys.argv) > 1:
-        # Clean the feature files.
-        if sys.argv[1] == "clean":
-            print "Cleaning feature files."
-            clean_features(filename_prefix, filename_prefix_test)
-            raise sys.exit(0)
+    # Create the LPData object.
+    lp_data = core.LPData(args.cache)
+    lp_data.set_train(raw_train_path, raw_train_key, gt_train_path, gt_train_key)
+    lp_data.set_test(raw_test_path, raw_test_key, gt_test_path, gt_test_key)
 
-        # Compute the special 900 block features.
-        if sys.argv[1] == "special_features":
-            print "Computing 900 block features."
-            core.compute_special_features(h5_key)
-            raise sys.exit(0)
+    # Check beforehand if the workflow arguments are usable.
+    allowed_workflows = ["clean", "compute_train", "compute_test", "compute_dists_train", "compute_dists_test",
+                         "load_train", "load_test", "load_dists_train", "load_dists_test", "load_all",
+                         "learn_dists", "predict", "TESThysteresis", "TESTcompare"]
+    for w in args.workflow:
+        if not w in allowed_workflows:
+            raise Exception("Unknown workflow: %s" % w)
 
-        # Compute the features.
-        if sys.argv[1] == "features":
-            # Load the data.
-            print "Loading data."
-            raw, gt, raw_test, gt_test = core.load_data()
+    # Parse the command line arguments and do the according stuff.
+    for w in args.workflow:
+        if w == "clean":
+            lp_data.clean_cache_folder()
+        elif w == "compute_train":
+            lp_data.compute_and_save_features(feature_list, "train")
+        elif w == "compute_test":
+            lp_data.compute_and_save_features(feature_list, "test")
+        elif w == "compute_dists_train":
+            lp_data.compute_distance_transform_on_gt("train")
+        elif w == "compute_dists_test":
+            lp_data.compute_distance_transform_on_gt("test")
+        elif w == "load_train":
+            lp_data.load_features(feature_list, "train")
+        elif w == "load_test":
+            lp_data.load_features(feature_list, "test")
+        elif w == "load_dists_train":
+            lp_data.load_dists("train")
+        elif w == "load_dists_test":
+            lp_data.load_dists("test")
+        elif w == "load_all":
+            lp_data.load_features(feature_list, "train")
+            lp_data.load_features(feature_list, "test")
+            lp_data.load_dists("train")
+            lp_data.load_dists("test")
+        elif w == "learn_dists":
+            lp_data.learn(gt_name="dists", n_estimators=args.estimators, n_jobs=args.jobs, invert_gt=True, cap=5.0)
+            # lp_data.learn(gt_name="dists", n_estimators=args.estimators, n_jobs=args.jobs, cap=5.0)
+        elif w == "predict":
+            # lp_data.predict(file_name="cache/pred_lam_01.h5", invert_gt=True)
+            lp_data.predict(file_name="cache/pred_cap_lam_01.h5", invert_gt=True)
+            # lp_data.predict(file_name="cache/pred_cap.h5")
+        elif w == "TESThysteresis":
+            # TODO: Is this workflow still needed?
+            TESTHYSTERESIS(lp_data)
+        elif w == "TESTcompare":
+            # TODO: Is this workflow still needed?
+            TESTCOMPARE(lp_data)
+        else:
+            raise Exception("Unknown workflow: %s" % w)
 
-            # Compute some features on the raw data.
-            print "Computing training features."
-            features = core.compute_features(raw, filename_prefix=filename_prefix, h5_key=h5_key, special="train")
-            print "Computing test features."
-            features_test = core.compute_features(raw_test, filename_prefix=filename_prefix_test, h5_key=h5_key, special="test")
-            raise sys.exit(0)
-
-        # Compute the distances.
-        if sys.argv[1] == "distances":
-            # Load the data.
-            print "Loading data."
-            raw, gt, raw_test, gt_test = core.load_data()
-            del raw
-            del raw_test
-
-            # Compute the distance transform on the edge image.
-            print "Computing distance transform on edge image."
-            edges = core.compute_edge_image(gt)
-            dists = vigra.filters.distanceTransform3D(edges.astype(numpy.float32))
-            vigra.writeHDF5(dists, filename_prefix + "dists.h5", "dists", compression="lzf")
-            del dists
-            del edges
-            edges_test = core.compute_edge_image(gt_test)
-            dists_test = vigra.filters.distanceTransform3D(edges_test.astype(numpy.float32))
-            vigra.writeHDF5(dists_test, filename_prefix_test + "dists.h5", "dists", compression="lzf")
-            del dists_test
-            del edges_test
-            raise sys.exit(0)
-
-        # Train-predict loop with random features.
-        if sys.argv[1] == "random":
-            random_train_predict_loop(filename_prefix, filename_prefix_test, steps, train_rate, test_rate, h5_key)
-            raise sys.exit(0)
-
-        # Do some test with the hysteresis.
-        if sys.argv[1] == "hysteresis":
-            # Load the data and the features.
-            print "Loading data."
-            raw, gt, raw_test, gt_test = core.load_data()
-            print "Loading the features."
-            feature_list = core.generate_feature_list(raw)
-            features = core.generate_feature_filenames(feature_list, filename_prefix, special="train")
-            del feature_list
-            feature_list_test = core.generate_feature_list(raw_test)
-            raw_test_size = raw_test.size
-            raw_test_shape = raw_test.shape
-            features_test = core.generate_feature_filenames(feature_list_test, filename_prefix_test, special="test")
-            del feature_list_test
-
-            hog1 = vigra.readHDF5(features[8], "feat").reshape(raw.shape)
-            hog1 = hog1 - numpy.min(hog1)
-            hog1 = hog1 / numpy.max(hog1)
-            hog2 = vigra.readHDF5(features[11], "feat").reshape(raw.shape)
-            hog2 = hog2 - numpy.min(hog2)
-            hog2 = hog2 / numpy.max(hog2)
-            hog4 = vigra.readHDF5(features[14], "feat").reshape(raw.shape)
-            hog4 = hog4 - numpy.min(hog4)
-            hog4 = hog4 / numpy.max(hog4)
-            thr1 = numpy.zeros(hog1.shape)
-            thr1[numpy.where(hog1 > 0.4)] = 1
-            thr2 = numpy.zeros(hog2.shape)
-            thr2[numpy.where(hog2 > 0.5)] = 1
-            thr4 = numpy.zeros(hog4.shape)
-            thr4[numpy.where(hog4 > 0.5)] = 1
-            hys1 = vigra.filters.hysteresisThreshold(hog1, 0.4, 0.0100).astype(numpy.float32)
-            hys2 = vigra.filters.hysteresisThreshold(hog2, 0.5, 0.0095).astype(numpy.float32)
-            hys4 = vigra.filters.hysteresisThreshold(hog4, 0.5, 0.004).astype(numpy.float32)
-
-            sl = numpy.index_exp[:, :, 10]
-            fig, ((ax1, ax2, ax3, ax4), (ax5, ax6, ax7, ax8), (ax9, ax10, ax11, ax12)) = plt.subplots(3, 4)
-            ax1.imshow(raw[sl])
-            ax2.imshow(hog1[sl])
-            ax3.imshow(hog2[sl])
-            ax4.imshow(hog4[sl])
-            fig.delaxes(ax5)
-            ax6.imshow(thr1[sl])
-            ax7.imshow(thr2[sl])
-            ax8.imshow(thr4[sl])
-            fig.delaxes(ax9)
-            ax10.imshow(hys1[sl])
-            ax11.imshow(hys2[sl])
-            ax12.imshow(hys4[sl])
-            plt.show()
+    return 0
 
 
-            raise sys.exit(0)
-
-
-
-    else:  # No command line arguments are given.
-        print "Please give the desired workflow as commandline argument."
-        raise sys.exit(0)
+if __name__ == "__main__":
+    status = main()
+    sys.exit(status)

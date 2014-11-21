@@ -1,229 +1,390 @@
+import os
 import vigra
 import numpy
-import skneuro.blockwise_filters as filters
 import skneuro.learning
-import h5py
+from sklearn.ensemble import RandomForestRegressor
+import logging as log
 
 
-def compute_special_features(h5_key="feat"):
-    """Compute some features on the 900 block and save them.
-    """
-    h5file = h5py.File("/home/philip/data/900_block/semantic_prob_r0.h5")
-    thresh = 0.5
+class LPData(object):
 
-    for i in range(5):
-        print "Step %d of %d" % (i+1, 5)
-        print "Loading training data."
-        train = h5file['data'][:900, :901, 702:902, i]
-        print "Applying threshold."
-        train[numpy.where(train < thresh)] = 0
-        train[numpy.where(train > 0)] = 1
-        print "Computing distance transform."
-        train = vigra.filters.distanceTransform3D(train.astype(numpy.float32))
-        train = train.reshape((train.size,))
-        vigra.writeHDF5(train, "train_feature_%s.h5" % str(i).zfill(2), h5_key, compression="lzf")
-        del train
+    @staticmethod
+    def e_power(data, lam):
+        """Apply exp(-lam * data) to the given data.
 
-        print "Loading test data."
-        test = h5file['data'][25:725, :700, :700, i]
-        print "Applying threshold."
-        test[numpy.where(test < thresh)] = 0
-        test[numpy.where(test > 0)] = 1
-        print "Computing distance transform."
-        test = vigra.filters.distanceTransform3D(test.astype(numpy.float32))
-        test = test.reshape((test.size,))
-        vigra.writeHDF5(test, "test_feature_%s.h5" % str(i).zfill(2), h5_key, compression="lzf")
-        del test
+        :param data: Some data.
+        :param lam: Exponent.
+        :return: exp(-lam * data)
+        """
+        return numpy.exp(1)**(-lam*data)
 
-    h5file.close()
+    @staticmethod
+    def e_power_inv(data, lam):
+        """Apply -log(data)/lam to the given data. This is inverse to e_power(data, lam).
 
+        :param data: Some data
+        :param lam: Exponent
+        :return: -log(data)/lam
+        """
+        return - numpy.log(data) / lam
 
-def load_data():
-    """Load 4 datasets: raw (training), ground truth (training), raw (test), ground truth (test)
+    @staticmethod
+    def normalize(feat):
+        """Normalizes the data between 0 and 1.
 
-    :return: raw_train, gt_train, raw_test, gt_test
-    """
-    # raw_path = "/home/philip/data/dataset03/training/raw.h5"
-    # raw_key = "raw"
-    # gt_path = "/home/philip/data/dataset03/training/gt_reg.h5"
-    # gt_key = "gt_reg"
-    #
-    # raw_test_path = "/home/philip/data/dataset03/test/raw.h5"
-    # raw_test_key = "raw"
-    # gt_test_path = "/home/philip/data/dataset03/test/gt_reg.h5"
-    # gt_test_key = "gt_reg"
+        :param feat: some data
+        :return: the normalized data
+        """
+        feat = feat - numpy.min(feat)
+        return feat / numpy.max(feat)
 
+    def __init__(self, cache_folder):
+        self.cache_folder = cache_folder
+        if not os.path.isdir(cache_folder):
+            os.mkdir(cache_folder)
 
-    raw_path = "/home/philip/data/dataset02_100/training/raw.h5"
-    raw_key = "raw"
-    gt_path = "/home/philip/data/dataset02_100/training/gt_reg.h5"
-    gt_key = "gt_reg"
+        self.feat_h5_key = "feat"
+        self.dists_h5_key = "dists"
+        self.pred_h5_key = "pred"
 
-    raw_test_path = "/home/philip/data/dataset02_100/test/raw.h5"
-    raw_test_key = "raw"
-    gt_test_path = "/home/philip/data/dataset02_100/test/gt_reg.h5"
-    gt_test_key = "gt_reg"
+        self.raw_train_path = None
+        self.raw_train_key = None
+        self.gt_train_path = None
+        self.gt_train_key = None
+        self.dists_train_path = None
 
+        self.raw_test_path = None
+        self.raw_test_key = None
+        self.gt_test_path = None
+        self.gt_test_key = None
+        self.dists_test_path = None
 
-    # raw_path = "/home/philip/data/900_block/train_raw.h5"
-    # raw_key = "raw"
-    # gt_path = "/home/philip/data/900_block/train_gt.h5"
-    # gt_key = "gt"
-    #
-    # raw_test_path = "/home/philip/data/900_block/test_raw.h5"
-    # raw_test_key = "raw"
-    # gt_test_path = "/home/philip/data/900_block/test_gt.h5"
-    # gt_test_key = "gt"
+        self.feature_file_names_train = None
+        self.feature_file_names_test = None
 
+        self.rf_regressor = None
 
-    # raw_path = "/home/philip/data/dataset01/training/data.h5"
-    # raw_key = "data"
-    # gt_path = "/home/philip/data/dataset01/training/groundtruth_t.h5"
-    # gt_key = "stack"
-    #
-    # raw_test_path = "/home/philip/data/dataset01/test/data.h5"
-    # raw_test_key = "data"
-    # gt_test_path = "/home/philip/data/dataset01/test/groundtruth_t.h5"
-    # gt_test_key = "stack"
+    def clean_cache_folder(self):
+        """Delete all files in the cache folder.
+        """
+        if os.path.isdir(self.cache_folder):
+            for f in os.listdir(self.cache_folder):
+                file_path = os.path.join(self.cache_folder, f)
+                if os.path.isfile(file_path):
+                    os.remove(file_path)
 
+    def get_raw_train(self):
+        """Returns the raw training data.
 
-    raw = vigra.readHDF5(raw_path, raw_key).astype(numpy.float32)
-    gt = vigra.readHDF5(gt_path, gt_key)
-    raw_test = vigra.readHDF5(raw_test_path, raw_test_key).astype(numpy.float32)
-    gt_test = vigra.readHDF5(gt_test_path, gt_test_key)
+        :return: raw training data
+        """
+        return vigra.readHDF5(self.raw_train_path, self.raw_train_key).astype(numpy.float32)
 
+    def get_raw_test(self):
+        """Returns the raw test data.
 
-    # raw = vigra.readHDF5(raw_path, raw_key)[:200, :200, :200]
-    # gt = vigra.readHDF5(gt_path, gt_key)[:200, :200, :200]
-    # raw_test = vigra.readHDF5(raw_test_path, raw_test_key)[:200, :200, :200]
-    # gt_test = vigra.readHDF5(gt_test_path, gt_test_key)[:200, :200, :200]
-    return raw, gt, raw_test, gt_test
+        :return: raw test data
+        """
+        return vigra.readHDF5(self.raw_test_path, self.raw_test_key).astype(numpy.float32)
 
+    def get_gt_train(self):
+        """Returns the ground truth training data.
 
-def pseudo_dist_on_hog_eigenvalue(data, threshold=0.5):
-    """Center the data between 0 and 1, apply the threshold and compute the distance transform on the result.
+        :return: ground truth training data
+        """
+        return vigra.readHDF5(self.gt_train_path, self.gt_train_key).astype(numpy.uint32)
 
-    :param data: some 3d numpy array
-    :param threshold: threshold
-    :return: distance transform after centering the data and applying the threshold
-    """
-    assert 0 <= threshold <= 1
-    c = data - numpy.min(data)
-    c /= numpy.max(c)
-    c[numpy.where(c < threshold)] = 0
-    c[numpy.where(c > 0)] = 1
-    c = c.astype(numpy.uint32)
-    return vigra.filters.distanceTransform3D(c.astype(numpy.float32))
+    def get_gt_test(self):
+        """Returns the ground truth test data.
 
+        :return: ground truth test data
+        """
+        return vigra.readHDF5(self.gt_test_path, self.gt_test_key).astype(numpy.uint32)
 
-def load_sub_samples(filenames, h5_key, sample_indices):
-    """Loads the given filenames as h5 file and extracts a random sub sample of the loaded data.
+    def get_feature_train(self, feat_id):
+        """Returns the training feature with the given id.
 
-    :param filenames: list with filenames
-    :param h5_key: h5 key
-    :param sample_indices: indices of the samples that is taken
-    :return: n x d numpy array with n samples and d features
-    """
-    features = numpy.zeros((len(sample_indices), len(filenames)))
-    for i in range(len(filenames)):
-        print "Loading feature %d of %d." % (i+1, len(filenames))
-        f = vigra.readHDF5(filenames[i], h5_key)
-        features[:, i] = f.reshape((f.size,))[sample_indices]
-    return features
+        :param feat_id: id of the feature
+        :return: the requested feature
+        """
+        return vigra.readHDF5(self.feature_file_names_train[feat_id], self.feat_h5_key).astype(numpy.float32)
 
+    def get_feature_test(self, feat_id):
+        """Returns the test feature with the given id.
 
-def generate_feature_list(data):
-    """Generates a list with features.
+        :param feat_id: id of the feature
+        :return: the requested feature
+        """
+        return vigra.readHDF5(self.feature_file_names_test[feat_id], self.feat_h5_key).astype(numpy.float32)
 
-    Each list item is of the form [number_of_features, function_name, function_args].
-    :param data: the data on which the features are computed
-    :return: list with features
-    """
-    return [[1, filters.blockwiseGaussianSmoothing, data, 1.0],
-            [1, filters.blockwiseGaussianSmoothing, data, 2.0],
-            [1, filters.blockwiseGaussianSmoothing, data, 4.0],
-            [1, filters.blockwiseGaussianGradientMagnitude, data, 1.0],
-            [1, filters.blockwiseGaussianGradientMagnitude, data, 2.0],
-            [1, filters.blockwiseGaussianGradientMagnitude, data, 4.0],
-            [3, filters.blockwiseHessianOfGaussianSortedEigenvalues, data, 1.0],
-            [3, filters.blockwiseHessianOfGaussianSortedEigenvalues, data, 2.0],
-            [3, filters.blockwiseHessianOfGaussianSortedEigenvalues, data, 4.0],
-            [1, filters.blockwiseLaplacianOfGaussian, data, 1.0],
-            [1, filters.blockwiseLaplacianOfGaussian, data, 2.0],
-            [1, filters.blockwiseLaplacianOfGaussian, data, 4.0],
-            [3, filters.blockwiseStructureTensorSortedEigenvalues, data, 0.5, 1.0],
-            [3, filters.blockwiseStructureTensorSortedEigenvalues, data, 1.0, 2.0],
-            [3, filters.blockwiseStructureTensorSortedEigenvalues, data, 2.0, 4.0]]
+    def set_train(self, raw_path, raw_key, gt_path, gt_key):
+        """Set path and h5 key for raw and ground truth for training data.
 
+        :param raw_path: Path to h5 file for raw data.
+        :param raw_key: Key in h5 file for raw data.
+        :param gt_path: Path to h5 file for ground truth data.
+        :param gt_key: Key in h5 file for ground truth data.
+        """
+        assert os.path.isfile(raw_path)
+        assert os.path.isfile(gt_path)
+        self.raw_train_path = raw_path
+        self.raw_train_key = raw_key
+        self.gt_train_path = gt_path
+        self.gt_train_key = gt_key
 
-def generate_feature_filenames(feature_list, filename_prefix, special=None):
-    """Generates a list with filenames for all features in feature_list.
+    def set_test(self, raw_path, raw_key, gt_path, gt_key):
+        """Set path and h5 key for raw and ground truth for test data.
 
-    :param feature_list: list with features (see generate_feature_list())
-    :param filename_prefix: prefix of the filenames
-    :param special: append the special 900 block features for test (special == "test") or training (special == "train")
-    :return: filenames of the features
-    """
-    count = 0
-    for feat in feature_list:
-        count += feat[0]
-    filenames = [filename_prefix + str(c).zfill(2) + ".h5" for c in range(count)]
+        :param raw_path: Path to h5 file for raw data.
+        :param raw_key: Key in h5 file for raw data.
+        :param gt_path: Path to h5 file for ground truth data.
+        :param gt_key: Key in h5 file for ground truth data.
+        """
+        assert os.path.isfile(raw_path)
+        assert os.path.isfile(gt_path)
+        self.raw_test_path = raw_path
+        self.raw_test_key = raw_key
+        self.gt_test_path = gt_path
+        self.gt_test_key = gt_key
 
-    # Append the special features for the 900 block.
-    if special == "train":
-        for i in range(5):
-            filenames.append("train_feature_%s.h5" % str(i).zfill(2))
-    if special == "test":
-        for i in range(5):
-            filenames.append("test_feature_%s.h5" % str(i).zfill(2))
+    def compute_and_save_features(self, feature_list, target="train", normalize=True):
+        """Compute the features from the list on training or test data and saves them to the cache folder.
 
-    return filenames
-
-
-def compute_features(data, filename_prefix="feature_", h5_key="feat", special=None):
-    """Compute some features on the given dataset and save them as h5 file.
-
-    Features will be saved as h5 file with the filename filename_prefix01.h5, filename_prefix02.h5, etc.
-    :param data: numpy array with raw data
-    :param filename_prefix: prefix of the used filename
-    :param h5_key: the h5 key for the features
-    :aram special: append the special 900 block features for test (special == "test") or training (special == "train")
-    :return: list of the filenames
-    """
-    # Get the desired features.
-    features = generate_feature_list(data)
-    filenames = generate_feature_filenames(features, filename_prefix, special=special)
-
-    # Call all functions in the features list and save the result as h5 file.
-    count = data.size
-    filenames_TMP = filenames[:]
-    filenames_TMP.reverse()
-    for feat in features:
-        f = feat[1](*feat[2:])
-        if feat[0] == 1:
-            filename = filenames_TMP.pop()
-            vigra.writeHDF5(f.reshape((count,)), filename, h5_key, compression="lzf")
+        :param feature_list: List with function calls of features. Each list item must be
+                             of the form [number_of_features, function_name, function_args].
+        :param target: Either "train" or "test".
+        :return: List with file names of the computed features.
+        """
+        # Read the data.
+        if target == "train":
+            data = self.get_raw_train()
+            prefix = "train_"
+        elif target == "test":
+            data = self.get_raw_test()
+            prefix = "test_"
         else:
-            f = f.reshape((count, feat[0]))
-            for k in range(feat[0]):
-                filename = filenames_TMP.pop()
-                vigra.writeHDF5(f[:, k], filename, h5_key, compression="lzf")
+            raise Exception('LPData.compute_and_save_features(): Parameter "target" must be either "train" or "test".')
 
-    # feat[:, 27] = pseudo_dist_on_hog_eigenvalue(feat[:, 8].reshape(data.shape)).reshape((count,))
-    # feat[:, 28] = pseudo_dist_on_hog_eigenvalue(feat[:, 11].reshape(data.shape)).reshape((count,))
-    # feat[:, 29] = pseudo_dist_on_hog_eigenvalue(feat[:, 14].reshape(data.shape)).reshape((count,))
+        # Find the zero fill in for the file names.
+        num_features = sum([p[0] for p in feature_list])
+        zfill = int(numpy.ceil(numpy.log10(num_features)))
 
-    return filenames
+        # Compute and save the features.
+        file_names = []
+        for feat_item in feature_list:
+            # Compute the feature.
+            feat = feat_item[1](*([data]+feat_item[2:]))
 
+            # Save the feature.
+            if feat_item[0] == 1:
+                file_names.append(os.path.join(self.cache_folder, prefix + str(len(file_names)).zfill(zfill) + ".h5"))
+                if normalize:
+                    feat = LPData.normalize(feat)
+                vigra.writeHDF5(feat, file_names[-1], self.feat_h5_key, compression="lzf")
+            else:
+                for k in range(feat_item[0]):
+                    file_names.append(os.path.join(self.cache_folder, prefix + str(len(file_names)).zfill(zfill) + ".h5"))
+                    if normalize:
+                        feat[..., -1] = LPData.normalize(feat[..., -1])
+                    vigra.writeHDF5(feat[..., -1], file_names[-1], self.feat_h5_key, compression="lzf")
 
-def compute_edge_image(img):
-    """Take a label image and return an edge image (1: edge, 0: no edge).
+        if target == "train":
+            self.feature_file_names_train = file_names
+        elif target == "test":
+            self.feature_file_names_test = file_names
 
-    :param img: labeled image
-    :return: edge image of img
-    """
-    tmp_edge_image = skneuro.learning.regionToEdgeGt(img)
-    edge_image = numpy.zeros(tmp_edge_image.shape, dtype=tmp_edge_image.dtype)
-    edge_image[tmp_edge_image == 1] = 0
-    edge_image[tmp_edge_image == 2] = 1
-    return edge_image
+    def load_features(self, feature_list, target="train"):
+        """Generate the file name list for the training or test features.
+
+        :param feature_list: List with function calls of features. Each list item must be
+                             of the form [number_of_features, function_name, function_args].
+        :param target: Either "train" or "test".
+        """
+        # Get the file name prefix.
+        if target == "train":
+            prefix = "train_"
+        elif target == "test":
+            prefix = "test_"
+        else:
+            raise Exception('LPData.load_features(): Parameter "target" must be either "train" or "test".')
+
+        # Find the zero fill in for the file names.
+        num_features = sum([p[0] for p in feature_list])
+        zfill = int(numpy.ceil(numpy.log10(num_features)))
+
+        # Create the file name list.
+        file_names = [os.path.join(self.cache_folder, prefix + str(i).zfill(zfill) + ".h5")
+                      for i in range(num_features)]
+
+        if target == "train":
+            self.feature_file_names_train = file_names
+        elif target == "test":
+            self.feature_file_names_test = file_names
+
+    def get_data_x(self, data_name="train"):
+        """Returns the desired data as a ready-to-use n x d sample (n instances with d features).
+
+        :param data_name: name of the data, either "train" or "test"
+        :return: data
+        """
+        if not data_name in ["train", "test"]:
+            raise Exception('LPData.get_data_x(): Parameter data_name must be either "train" or "test".')
+
+        if data_name == "train":
+            file_names = self.feature_file_names_train
+        elif data_name == "test":
+            file_names = self.feature_file_names_test
+
+        if len(file_names) == 0:
+            raise Exception("LPData.get_data_x(): There is no data that can be returned.")
+
+        # Load the first feature to get the number of instances.
+        d = vigra.readHDF5(file_names[0], self.feat_h5_key).flatten()
+        data = numpy.zeros((d.shape[0], len(file_names)))
+        data[:, 0] = d
+
+        # Load the other features.
+        for i, file_name in enumerate(file_names[1:]):
+            data[:, i+1] = vigra.readHDF5(file_name, self.feat_h5_key).flatten()
+
+        return data
+
+    def get_data_y(self, data_name="train", data_type="gt"):
+        """Returns the desired ground truth labels.
+
+        :param data_name: name of the data, either "train" or "test"
+        :param data_type: type of the ground truth, either "gt" or "dists"
+        :return:
+        """
+        if not data_name in ["train", "test"]:
+            raise Exception('LPData.get_data_y(): Parameter data_name must be either "train" or "test".')
+        if not data_type in ["gt", "dists"]:
+            raise Exception('LPData.get_data_y(): Parameter data_type must be either "gt" or "dists".')
+
+        # Load the desired data.
+        if data_name == "train" and data_type == "gt":
+            return vigra.readHDF5(self.gt_train_path, self.gt_train_key).flatten()
+        if data_name == "train" and data_type == "dists":
+            return vigra.readHDF5(self.dists_train_path, self.dists_h5_key).flatten()
+        if data_name == "test" and data_type == "gt":
+            return vigra.readHDF5(self.gt_test_path, self.gt_test_key).flatten()
+        if data_name == "test" and data_type == "dists":
+            return vigra.readHDF5(self.dists_test_path, self.dists_h5_key).flatten()
+        raise Exception("LPData.get_data_y(): Congratulations, you have reached unreachable code.")
+
+    def get_train_x(self):
+        """Return the training data as a ready-to-use n x d sample (n instances with d features).
+
+        :return: training data
+        """
+        return self.get_data_x("train")
+
+    def get_train_y(self, data="gt"):
+        """Return the training labels.
+
+        :param data: which ground truth shall be returned, either "gt" or "dists"
+        :return: training labels
+        """
+        return self.get_data_y("train", data)
+
+    def get_test_x(self):
+        """Return the test data as a ready-to-use n x d sample (n instances with d features).
+
+        :return: test data
+        """
+        return self.get_data_x("test")
+
+    def get_test_y(self, data="gt"):
+        """Return the test labels.
+
+        :param data: which ground truth shall be returned, either "gt" or "dists"
+        :return: test labels
+        """
+        return self.get_data_y("test", data)
+
+    def compute_distance_transform_on_gt(self, target="train"):
+        """
+        Compute the distance transform of the edge image of ground truth of training or test data and save it to the
+        cache folder.
+
+        :param target: Either "train" or "test".
+        """
+        # Read the data.
+        if target == "train":
+            data = self.get_gt_train()
+            file_name = os.path.join(self.cache_folder, "dists_train.h5")
+            self.dists_train_path = file_name
+        elif target == "test":
+            data = self.get_gt_test()
+            file_name = os.path.join(self.cache_folder, "dists_test.h5")
+            self.dists_test_path = file_name
+        else:
+            raise Exception('LPData.compute_distance_transform_on_gt(): Parameter "target" must be "train" or "test".')
+
+        # Compute the edge image and the distance transform.
+        edges = skneuro.learning.regionToEdgeGt(data)
+        edges[edges == 1] = 0
+        edges[edges == 2] = 1
+        dists = vigra.filters.distanceTransform3D(edges.astype(numpy.float32))
+
+        # Save the result.
+        vigra.writeHDF5(dists, file_name, self.dists_h5_key, compression="lzf")
+
+    def load_dists(self, target="train"):
+        """Load distance transform.
+
+        :param target: Either "train" or "test".
+        """
+        if target == "train":
+            self.dists_train_path = os.path.join(self.cache_folder, "dists_train.h5")
+        elif target == "test":
+            self.dists_test_path = os.path.join(self.cache_folder, "dists_test.h5")
+        else:
+            raise Exception('LPData.load_dists(): Parameter "target" must be "train" or "test".')
+
+    def learn(self, gt_name="gt", n_estimators=10, n_jobs=1, invert_gt=False, lam=0.1, cap=0):
+        """Learn the training data.
+
+        :param gt_name: which ground truth shall be used, either "gt" or "dists"
+        :param n_estimators: number of estimators for the random forest regressor
+        :param n_jobs: number of jobs that will be used in the random forest regressor
+        :param invert_gt: whether the ground truth values shall be modified by exp(-lam * gt)
+        :param lam: the value of lam used for the inversion
+        :param cap: maximum value of the ground truth data (ignored if 0), all larger values will be set to cap
+        """
+        if not gt_name in ["gt", "dists"]:
+            raise Exception('LPData.learn_dists(): Parameter gt_name must be either "gt" or "dists".')
+
+        # Get ground truth and cap and invert it.
+        gt = self.get_train_y(gt_name)
+        if cap != 0:
+            gt[gt > cap] = cap
+        if invert_gt:
+            gt = LPData.e_power(gt, lam)
+
+        self.rf_regressor = RandomForestRegressor(n_estimators=n_estimators, n_jobs=n_jobs)
+        log.info("Fitting the random forest regressor with %d estimators and %d cores." % (n_estimators, n_jobs))
+        self.rf_regressor.fit(self.get_train_x(), gt)
+        log.info("... done with fitting.")
+
+    def predict(self, file_name=None, invert_gt=False, lam=0.1):
+        """Predict the test data and [optional] save the predicted labels.
+
+        :param file_name: output file name, if file_name is None, no output file will be produced
+        :param invert_gt: whether the ground truth values where modified by exp(-lam * gt)
+        :param lam: the value of lam used for the inversion
+        :return: predicted labels of the test data
+        """
+        log.info("Predicting.")
+        pred = self.rf_regressor.predict(self.get_test_x())
+        log.info("... done with predicting.")
+
+        # Revert the values.
+        if invert_gt:
+            pred = LPData.e_power_inv(pred, lam)
+
+        # Save the output.
+        if not file_name is None:
+            vigra.writeHDF5(pred, file_name, self.pred_h5_key)
+
+        return pred

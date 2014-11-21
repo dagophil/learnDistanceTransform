@@ -1,0 +1,3 @@
+python learn.py load_all learn_dists predict -v --jobs 7
+python learn.py load_all TESTcompare -v
+
