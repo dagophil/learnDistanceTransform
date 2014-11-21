@@ -67,6 +67,22 @@ def TESTHYSTERESIS(lp_data):
     show_plots((1, 3), (raw[sl], hog1[sl], hys1[sl]))
 
 
+def round_to_nearest(arr, l):
+    """Round all values in arr to the nearest value in l and return the result.
+
+    :param arr: numpy array
+    :param l: list
+    :return: rounded array
+    """
+    l = sorted(l)
+    arr_rounded = numpy.zeros(arr.shape)
+    arr_rounded[arr < (l[0] + l[1]) / 2.0] = l[0]
+    arr_rounded[arr >= (l[-1] + l[-2]) / 2.0] = l[-1]
+    for i in range(1, len(l) - 1):
+        arr_rounded[numpy.logical_and((l[i-1] + l[i]) / 2.0 <= arr, arr < (l[i] + l[i+1]) / 2.0)] = l[i]
+    return arr_rounded
+
+
 def TESTCOMPARE(lp_data):
     """
 
@@ -76,13 +92,15 @@ def TESTCOMPARE(lp_data):
     sh = (100, 100, 100)
     dists_test = lp_data.get_data_y("test", "dists").reshape(sh)
 
-    dists_test[dists_test > 5] = 5
+    cap = 5
+    dists_test[dists_test > cap] = cap
+    allowed_vals = sorted(numpy.unique(dists_test))
 
     pred_inv = vigra.readHDF5("cache/pred_cap_lam_01.h5", "pred").reshape(sh)
-    pred_inv_round = numpy.round(pred_inv)
+    pred_inv_nearest = round_to_nearest(pred_inv, allowed_vals)
 
     sl = numpy.index_exp[:, :, 50]
-    show_plots((1, 3), (dists_test[sl], pred_inv[sl], pred_inv_round[sl]), interpolation="nearest")
+    show_plots((1, 3), (dists_test[sl], pred_inv[sl], pred_inv_nearest[sl]), interpolation="nearest")
 
 
 def process_command_line():
