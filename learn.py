@@ -75,11 +75,12 @@ def round_to_nearest(arr, l):
     :return: rounded array
     """
     l = sorted(l)
+    splits = [(l[i] + l[i+1]) / 2.0 for i in xrange(len(l)-1)]
     arr_rounded = numpy.zeros(arr.shape)
-    arr_rounded[arr < (l[0] + l[1]) / 2.0] = l[0]
-    arr_rounded[arr >= (l[-1] + l[-2]) / 2.0] = l[-1]
-    for i in range(1, len(l) - 1):
-        arr_rounded[numpy.logical_and((l[i-1] + l[i]) / 2.0 <= arr, arr < (l[i] + l[i+1]) / 2.0)] = l[i]
+    arr_rounded[arr < splits[0]] = l[0]
+    arr_rounded[arr >= splits[-1]] = l[-1]
+    for i in xrange(0, len(splits) - 1):
+        arr_rounded[numpy.logical_and(splits[i] <= arr, arr < splits[i+1])] = l[i+1]
     return arr_rounded
 
 
