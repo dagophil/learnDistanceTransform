@@ -45,11 +45,12 @@ def data_names_dataset02_test():
            "/home/philip/data/dataset02_100/test/gt_reg.h5", "gt_reg"
 
 
-def show_plots(shape, plots):
+def show_plots(shape, plots, interpolation="bilinear"):
     """Create a plot of the given shape and show the plots.
 
     :param shape: 2-tuple of integers
     :param plots: iterable of plots
+    :param interpolation: interpolation argument to imshow
     """
     assert 2 == len(shape)
     assert shape[0]*shape[1] == len(plots)
@@ -57,11 +58,11 @@ def show_plots(shape, plots):
     for i, p in enumerate(plots):
         ind0, ind1 = numpy.unravel_index(i, shape)
         if shape[0] == 1:
-            rows[ind1].imshow(p)
+            rows[ind1].imshow(p, interpolation=interpolation)
         elif shape[1] == 1:
-            rows[ind0].imshow(p)
+            rows[ind0].imshow(p, interpolation=interpolation)
         else:
-            rows[ind0][ind1].imshow(p)
+            rows[ind0][ind1].imshow(p, interpolation=interpolation)
     plt.show()
 
 
@@ -85,11 +86,16 @@ def TESTCOMPARE(lp_data):
     :param lp_data:
     :return:
     """
-    pred = vigra.readHDF5("cache/pred.h5", "pred").reshape((100, 100, 100))
-    dists_test = lp_data.get_data_y("test", "dists").reshape((100, 100, 100))
+    sh = (100, 100, 100)
+    dists_test = lp_data.get_data_y("test", "dists").reshape(sh)
+
+    dists_test[dists_test > 5] = 5
+
+    pred_inv = vigra.readHDF5("cache/pred_cap_lam_01.h5", "pred").reshape(sh)
+    pred_inv_round = numpy.round(pred_inv)
 
     sl = numpy.index_exp[:, :, 50]
-    show_plots((1, 2), (dists_test[sl], pred[sl]))
+    show_plots((1, 3), (dists_test[sl], pred_inv[sl], pred_inv_round[sl]), interpolation="nearest")
 
 
 def process_command_line():
@@ -102,6 +108,8 @@ def process_command_line():
     parser.add_argument("--jobs", type=int, default=1, help="number of cores that can be used")
     parser.add_argument("--estimators", type=int, default=10, help="number of estimators for random forest regressor")
     parser.add_argument("-v", "--verbose", action="store_true", default=False, help="print verbose output")
+    parser.add_argument("--cap", type=float, default=0,
+                        help="maximum value of distance transform (ignored if 0), all larger values will be set to this")
     return parser.parse_args()
 
 
@@ -164,9 +172,12 @@ def main():
             lp_data.load_dists("train")
             lp_data.load_dists("test")
         elif w == "learn_dists":
-            lp_data.learn(gt="dists", n_estimators=args.estimators, n_jobs=args.jobs)
+            lp_data.learn(gt_name="dists", n_estimators=args.estimators, n_jobs=args.jobs, invert_gt=True, cap=5.0)
+            # lp_data.learn(gt_name="dists", n_estimators=args.estimators, n_jobs=args.jobs, cap=5.0)
         elif w == "predict":
-            lp_data.predict(file_name="cache/pred.h5")
+            # lp_data.predict(file_name="cache/pred_lam_01.h5", invert_gt=True)
+            lp_data.predict(file_name="cache/pred_cap_lam_01.h5", invert_gt=True)
+            # lp_data.predict(file_name="cache/pred_cap.h5")
         elif w == "TESThysteresis":
             # TODO: Is this workflow still needed?
             TESTHYSTERESIS(lp_data)

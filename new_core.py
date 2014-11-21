@@ -342,30 +342,46 @@ class LPData(object):
         else:
             raise Exception('LPData.load_dists(): Parameter "target" must be "train" or "test".')
 
-    def learn(self, gt="gt", n_estimators=10, n_jobs=1):
+    def learn(self, gt_name="gt", n_estimators=10, n_jobs=1, invert_gt=False, lam=0.1, cap=0):
         """Learn the training data.
 
-        :param gt: which ground truth shall be used, either "gt" or "dists"
+        :param gt_name: which ground truth shall be used, either "gt" or "dists"
         :param n_estimators: number of estimators for the random forest regressor
         :param n_jobs: number of jobs that will be used in the random forest regressor
+        :param invert_gt: whether the ground truth values shall be modified by exp(-lam * gt)
+        :param lam: the value of lam used for the inversion
+        :param cap: maximum value of the ground truth data (ignored if 0), all larger values will be set to cap
         """
-        if not gt in ["gt", "dists"]:
-            raise Exception('LPData.learn_dists(): Parameter gt must be either "gt" or "dists".')
+        if not gt_name in ["gt", "dists"]:
+            raise Exception('LPData.learn_dists(): Parameter gt_name must be either "gt" or "dists".')
+
+        # Get ground truth and cap and invert it.
+        gt = self.get_train_y(gt_name)
+        if cap != 0:
+            gt[gt > cap] = cap
+        if invert_gt:
+            gt = LPData.e_power(gt, lam)
 
         self.rf_regressor = RandomForestRegressor(n_estimators=n_estimators, n_jobs=n_jobs)
         log.info("Fitting the random forest regressor with %d estimators and %d cores." % (n_estimators, n_jobs))
-        self.rf_regressor.fit(self.get_train_x(), self.get_train_y(gt))
+        self.rf_regressor.fit(self.get_train_x(), gt)
         log.info("... done with fitting.")
 
-    def predict(self, file_name=None):
+    def predict(self, file_name=None, invert_gt=False, lam=0.1):
         """Predict the test data and [optional] save the predicted labels.
 
         :param file_name: output file name, if file_name is None, no output file will be produced
+        :param invert_gt: whether the ground truth values where modified by exp(-lam * gt)
+        :param lam: the value of lam used for the inversion
         :return: predicted labels of the test data
         """
         log.info("Predicting.")
         pred = self.rf_regressor.predict(self.get_test_x())
         log.info("... done with predicting.")
+
+        # Revert the values.
+        if invert_gt:
+            pred = LPData.e_power_inv(pred, lam)
 
         # Save the output.
         if not file_name is None:
