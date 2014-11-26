@@ -2,4 +2,5 @@ python learn.py clean
 python learn.py compute_train compute_test compute_dists_train compute_dists_test
 python learn.py load_all learn_dists predict -v --jobs 7
 python learn.py load_all TESTcompare -v
+python learn.py load_all build_gm -v --jobs 7
 

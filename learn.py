@@ -6,7 +6,7 @@ import vigra
 import numpy
 import matplotlib.pyplot as plt
 import logging as log
-import data
+import loaddata
 
 
 def create_dummy_feature_list():
@@ -67,23 +67,6 @@ def TESTHYSTERESIS(lp_data):
     show_plots((1, 3), (raw[sl], hog1[sl], hys1[sl]))
 
 
-def round_to_nearest(arr, l):
-    """Round all values in arr to the nearest value in l and return the result.
-
-    :param arr: numpy array
-    :param l: list
-    :return: rounded array
-    """
-    l = sorted(l)
-    splits = [(l[i] + l[i+1]) / 2.0 for i in xrange(len(l)-1)]
-    arr_rounded = numpy.zeros(arr.shape)
-    arr_rounded[arr < splits[0]] = l[0]
-    arr_rounded[arr >= splits[-1]] = l[-1]
-    for i in xrange(0, len(splits) - 1):
-        arr_rounded[numpy.logical_and(splits[i] <= arr, arr < splits[i+1])] = l[i+1]
-    return arr_rounded
-
-
 def TESTCOMPARE(lp_data):
     """
 
@@ -98,10 +81,20 @@ def TESTCOMPARE(lp_data):
     allowed_vals = sorted(numpy.unique(dists_test))
 
     pred_inv = vigra.readHDF5("cache/pred_cap_lam_01.h5", "pred").reshape(sh)
-    pred_inv_nearest = round_to_nearest(pred_inv, allowed_vals)
+    pred_inv_nearest = core.round_to_nearest(pred_inv, allowed_vals)
 
     sl = numpy.index_exp[:, :, 50]
     show_plots((1, 3), (dists_test[sl], pred_inv[sl], pred_inv_nearest[sl]), interpolation="nearest")
+
+
+def build_distance_gm(data):
+    """Build a graphical model to enhance the predicted distance transform.
+
+    :param data: the predicted distance transform
+    :return: graphical model
+    """
+    print data.shape
+    raise NotImplementedError
 
 
 def process_command_line():
@@ -132,8 +125,8 @@ def main():
     # ==========================
     # =====   Parameters   =====
     # ==========================
-    raw_train_path, raw_train_key, gt_train_path, gt_train_key = data.data_names_dataset02_training()
-    raw_test_path, raw_test_key, gt_test_path, gt_test_key = data.data_names_dataset02_test()
+    raw_train_path, raw_train_key, gt_train_path, gt_train_key = loaddata.data_names_dataset02_training()
+    raw_test_path, raw_test_key, gt_test_path, gt_test_key = loaddata.data_names_dataset02_test()
     feature_list = create_dummy_feature_list()
     # ==========================
     # ==========================
@@ -147,9 +140,10 @@ def main():
     # Check beforehand if the workflow arguments are usable.
     allowed_workflows = ["clean", "compute_train", "compute_test", "compute_dists_train", "compute_dists_test",
                          "load_train", "load_test", "load_dists_train", "load_dists_test", "load_all",
-                         "learn_dists", "predict", "TESThysteresis", "TESTcompare"]
+                         "learn_dists", "predict", "load_pred", "build_gm_dists",
+                         "TESThysteresis", "TESTcompare"]
     for w in args.workflow:
-        if not w in allowed_workflows:
+        if w not in allowed_workflows:
             raise Exception("Unknown workflow: %s" % w)
 
     # Parse the command line arguments and do the according stuff.
@@ -184,6 +178,12 @@ def main():
             # lp_data.predict(file_name="cache/pred_lam_01.h5", invert_gt=True)
             lp_data.predict(file_name="cache/pred_cap_lam_01.h5", invert_gt=True)
             # lp_data.predict(file_name="cache/pred_cap.h5")
+        elif w == "load_pred":
+            lp_data.pred_path = "cache/pred_cap_lam_01.h5"
+            lp_data.pred_cap = 5
+        elif w == "build_gm_dists":
+            gm = lp_data.build_gm_dists()
+            # TODO: What to do with the graphical model?
         elif w == "TESThysteresis":
             # TODO: Is this workflow still needed?
             TESTHYSTERESIS(lp_data)

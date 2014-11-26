@@ -4,6 +4,24 @@ import numpy
 import skneuro.learning
 from sklearn.ensemble import RandomForestRegressor
 import logging as log
+import opengm
+
+
+def round_to_nearest(arr, l):
+    """Round all values in arr to the nearest value in l and return the result.
+
+    :param arr: numpy array
+    :param l: list
+    :return: rounded array
+    """
+    l = sorted(l)
+    splits = [(l[i] + l[i+1]) / 2.0 for i in xrange(len(l)-1)]
+    arr_rounded = numpy.zeros(arr.shape)
+    arr_rounded[arr < splits[0]] = l[0]
+    arr_rounded[arr >= splits[-1]] = l[-1]
+    for i in xrange(0, len(splits) - 1):
+        arr_rounded[numpy.logical_and(splits[i] <= arr, arr < splits[i+1])] = l[i+1]
+    return arr_rounded
 
 
 class LPData(object):
@@ -61,6 +79,9 @@ class LPData(object):
 
         self.feature_file_names_train = None
         self.feature_file_names_test = None
+
+        self.pred_path = None
+        self.pred_cap = None
 
         self.rf_regressor = None
 
@@ -384,7 +405,46 @@ class LPData(object):
             pred = LPData.e_power_inv(pred, lam)
 
         # Save the output.
-        if not file_name is None:
+        if file_name is not None:
             vigra.writeHDF5(pred, file_name, self.pred_h5_key)
+            self.pred_path = file_name
 
         return pred
+
+    def build_gm_dists(self):
+        """Build a graphical model from the predicted data.
+
+        :return: graphical model
+        """
+        # Get the original shape.
+        raw = vigra.readHDF5(self.raw_test_path, self.raw_test_key)
+        sh = raw.shape
+        del raw
+
+        # Get the allowed values of the distance transform.
+        test_y = self.get_test_y("dists")
+        cap = self.pred_cap
+        if cap is None:
+            cap = numpy.max(test_y)
+        test_y[test_y > cap] = cap
+        allowed_vals = sorted(numpy.unique(test_y))
+
+        # Read the predicted data.
+        data = vigra.readHDF5(self.pred_path, self.pred_h5_key).reshape(sh)
+        data = round_to_nearest(data, allowed_vals)
+
+        # Build the graphical model.
+        num_vars = data.size
+        num_labels = len(allowed_vals)
+        variable_space = numpy.ones(data.size) * num_labels
+        gm = opengm.gm(variable_space)
+
+        # Add the unaries.
+        # TODO: Add unaries.
+        # unaries = numpy.ones()
+
+        # print gm.numberOfVariables
+        # print gm.numberOfLabels(0)
+
+        import sys
+        raise sys.exit(0)
