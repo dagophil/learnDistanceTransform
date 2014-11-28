@@ -452,11 +452,6 @@ class LPData(object):
         allowed_vals = sorted(numpy.unique(test_y))
         num_labels = len(allowed_vals)
 
-        # TODO: Remove output.
-        print "Labels:"
-        for i, v in enumerate(allowed_vals):
-            print "%d: %f" % (i, v)
-
         # Read the predicted data.
         data = vigra.readHDF5(self.pred_path, self.pred_h5_key).reshape(sh)
         data_arg = round_to_nearest_arg(data, allowed_vals)
@@ -465,26 +460,73 @@ class LPData(object):
 
         # Create the unaries.
         log.info("Adding unaries.")
+        scale_un = 2.5
         unary_matrix = numpy.zeros((num_labels, num_labels))
         for i in xrange(num_labels):
-            fun = numpy.array([numpy.abs(allowed_vals[i] - v) for v in allowed_vals])
-            fun[fun > 3.0] = 3.0
-            unary_matrix[i, :] = fun
+            dist = numpy.array([numpy.abs(allowed_vals[i] - v) for v in allowed_vals])
+            dist[dist > 2.0] = 2.0
+            unary_matrix[i, :] = scale_un * dist
         unaries = unary_matrix[data_arg]
 
-        # Create and add the binary functions.
-        log.info("Adding binaries.")
-        regularizer = 0.4 * numpy.ones((num_labels, num_labels))
+        # Create and add the grid binary functions.
+        log.info("Adding grid binaries.")
+        scale = 0.4
+        regularizer = numpy.zeros((num_labels, num_labels))
         for i in xrange(num_labels):
-            # TODO: Use something that is more related to the distance transform.
-            regularizer[i, i] = 0.2
-            if i+1 < num_labels:
-                regularizer[i, i+1] = 0
-                regularizer[i+1, i] = 0
+            for j in xrange(num_labels):
+                dist = numpy.abs(allowed_vals[j] - allowed_vals[i])
+                if dist == 0:
+                    penalty = 0.5
+                elif dist < 0.95:
+                    penalty = 0.4
+                elif dist < 1.05:
+                    penalty = 0.3
+                else:  # dist > 1
+                    penalty = 2.0
+                regularizer[i, j] = scale * penalty
+        regularizer[0, 0] = 0
+        regularizer[num_labels-1, num_labels-1] = 0
 
         # Create the graphical model.
         log.info("Creating the gm.")
         gm = opengm.grid3d2Order(unaries=unaries, regularizer=regularizer)
+
+        # Create and add the 2-diagonal binary functions.
+        log.info("Adding 2-diagonal binaries.")
+        scale_2 = 0.4
+        regularizer_2 = numpy.zeros((num_labels, num_labels))
+        for i in xrange(num_labels):
+            for j in xrange(num_labels):
+                dist = numpy.abs(allowed_vals[j] - allowed_vals[i])
+                if dist == 0:
+                    penalty = 0.5
+                elif dist < 0.95 * allowed_vals[2]:
+                    penalty = 0.4
+                elif dist < 1.05 * allowed_vals[2]:
+                    penalty = 0.3
+                else:  # dist > sqrt(2)
+                    penalty = 2 * allowed_vals[2]
+                regularizer_2[i, j] = scale_2 * penalty
+        regularizer_2[0, 0] = 0
+        regularizer_2[num_labels-1, num_labels-1] = 0
+        regularizer_2_id = gm.addFunction(regularizer_2)
+        for z in xrange(sh[2]):
+            for y in xrange(sh[1]):
+                for x in xrange(sh[0]):
+                    # Add the three 2-diagonals.
+                    var0_index = numpy.ravel_multi_index((x, y, z), sh)
+                    if x+1 < sh[0] and y+1 < sh[1]:
+                        var1_index = numpy.ravel_multi_index((x+1, y+1, z), sh)
+                        gm.addFactor(regularizer_2_id, [int(var0_index), int(var1_index)])
+                    if x+1 < sh[0] and z+1 < sh[2]:
+                        var1_index = numpy.ravel_multi_index((x+1, y, z+1), sh)
+                        gm.addFactor(regularizer_2_id, [int(var0_index), int(var1_index)])
+                    if y+1 < sh[1] and z+1 < sh[2]:
+                        var1_index = numpy.ravel_multi_index((x, y+1, z+1), sh)
+                        gm.addFactor(regularizer_2_id, [int(var0_index), int(var1_index)])
+
+
+
 
         # Solve the graphical model.
         # TODO: Try other solvers: fastpd // alpha expansion // icm
@@ -493,7 +535,6 @@ class LPData(object):
         icm_solver.infer()
         data_res = icm_solver.arg()
         data_res = data_res.reshape(sh)
-        log.info("... done")
 
         # Replace the labels by the distance transform values.
         data_res = numpy.array(allowed_vals)[data_res]
