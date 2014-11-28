@@ -32,24 +32,32 @@ def create_dummy_feature_list():
             [3, filters.blockwiseStructureTensorSortedEigenvalues, 2.0, 4.0]]
 
 
-def show_plots(shape, plots, interpolation="bilinear"):
+def show_plots(shape, plots, interpolation="bilinear", titles=None):
     """Create a plot of the given shape and show the plots.
 
     :param shape: 2-tuple of integers
     :param plots: iterable of plots
     :param interpolation: interpolation argument to imshow
     """
+    if titles is None:
+        titles = []
+    if len(titles) < len(plots):
+        titles += [""] * (len(plots) - len(titles))
     assert 2 == len(shape)
     assert shape[0]*shape[1] == len(plots)
+    assert len(titles) == len(plots)
+
     fig, rows = plt.subplots(*shape)
     for i, p in enumerate(plots):
         ind0, ind1 = numpy.unravel_index(i, shape)
         if shape[0] == 1:
-            rows[ind1].imshow(p, interpolation=interpolation)
+            ax = rows[ind1]
         elif shape[1] == 1:
-            rows[ind0].imshow(p, interpolation=interpolation)
+            ax = rows[ind0]
         else:
-            rows[ind0][ind1].imshow(p, interpolation=interpolation)
+            ax = rows[ind0][ind1]
+        ax.imshow(p, interpolation=interpolation)
+        ax.set_title(titles[i])
     plt.show()
 
 
@@ -84,7 +92,10 @@ def TESTCOMPARE(lp_data):
     pred_inv_nearest = core.round_to_nearest(pred_inv, allowed_vals)
 
     sl = numpy.index_exp[:, :, 50]
-    show_plots((1, 3), (dists_test[sl], pred_inv[sl], pred_inv_nearest[sl]), interpolation="nearest")
+    show_plots((1, 3),
+               (dists_test[sl], pred_inv[sl], pred_inv_nearest[sl]),
+               titles=["dists", "pred", "pred_rounded"],
+               interpolation="nearest")
 
 
 def build_distance_gm(data):

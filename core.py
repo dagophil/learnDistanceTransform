@@ -24,6 +24,27 @@ def round_to_nearest(arr, l):
     return arr_rounded
 
 
+def round_to_nearest_arg(arr, l):
+    """Round all values in arr to the nearest value in l and replace the value with the corresponding index in l.
+
+    :param arr: numpy array
+    :param l: list
+    :return: rounded arg array
+    """
+    assert len(l) > 0
+    arr_rounded = numpy.zeros(arr.shape, dtype=numpy.uint32)
+    if len(l) == 1:
+        arr_rounded[:] = l[0]
+    else:
+        l = sorted(l)
+        splits = [(l[i] + l[i+1]) / 2.0 for i in xrange(len(l)-1)]
+        arr_rounded[arr < splits[0]] = 0
+        arr_rounded[arr >= splits[-1]] = len(l)-1
+        for i in xrange(0, len(splits) - 1):
+            arr_rounded[numpy.logical_and(splits[i] <= arr, arr < splits[i+1])] = i+1
+    return arr_rounded
+
+
 class LPData(object):
 
     @staticmethod
@@ -416,6 +437,7 @@ class LPData(object):
 
         :return: graphical model
         """
+        log.info("Creating the graphical model:")
         # Get the original shape.
         raw = vigra.readHDF5(self.raw_test_path, self.raw_test_key)
         sh = raw.shape
@@ -428,23 +450,61 @@ class LPData(object):
             cap = numpy.max(test_y)
         test_y[test_y > cap] = cap
         allowed_vals = sorted(numpy.unique(test_y))
+        num_labels = len(allowed_vals)
+
+        # TODO: Remove output.
+        print "Labels:"
+        for i, v in enumerate(allowed_vals):
+            print "%d: %f" % (i, v)
 
         # Read the predicted data.
         data = vigra.readHDF5(self.pred_path, self.pred_h5_key).reshape(sh)
-        data = round_to_nearest(data, allowed_vals)
+        data_arg = round_to_nearest_arg(data, allowed_vals)
+        data_flat = data_arg.flatten()
+        num_vars = data_flat.size
 
-        # Build the graphical model.
-        num_vars = data.size
-        num_labels = len(allowed_vals)
-        variable_space = numpy.ones(data.size) * num_labels
-        gm = opengm.gm(variable_space)
+        # Create the unaries.
+        log.info("Adding unaries.")
+        unary_matrix = numpy.zeros((num_labels, num_labels))
+        for i in xrange(num_labels):
+            fun = numpy.array([numpy.abs(allowed_vals[i] - v) for v in allowed_vals])
+            fun[fun > 3.0] = 3.0
+            unary_matrix[i, :] = fun
+        unaries = unary_matrix[data_arg]
 
-        # Add the unaries.
-        # TODO: Add unaries.
-        # unaries = numpy.ones()
+        # Create and add the binary functions.
+        log.info("Adding binaries.")
+        regularizer = 0.4 * numpy.ones((num_labels, num_labels))
+        for i in xrange(num_labels):
+            # TODO: Use something that is more related to the distance transform.
+            regularizer[i, i] = 0.2
+            if i+1 < num_labels:
+                regularizer[i, i+1] = 0
+                regularizer[i+1, i] = 0
 
-        # print gm.numberOfVariables
-        # print gm.numberOfLabels(0)
+        # Create the graphical model.
+        log.info("Creating the gm.")
+        gm = opengm.grid3d2Order(unaries=unaries, regularizer=regularizer)
 
+        # Solve the graphical model.
+        # TODO: Try other solvers: fastpd // alpha expansion // icm
+        log.info("Solving the gm.")
+        icm_solver = opengm.inference.Icm(gm=gm)
+        icm_solver.infer()
+        data_res = icm_solver.arg()
+        data_res = data_res.reshape(sh)
+        log.info("... done")
+
+        # Replace the labels by the distance transform values.
+        data_res = numpy.array(allowed_vals)[data_res]
+        data_rounded = numpy.array(allowed_vals)[data_arg]
+
+        from learn import show_plots
+        gt = self.get_test_y("dists").reshape(sh)
+        gt[gt > 5.0] = 5.0
+        show_plots((2, 2),
+                   (gt[:, :, 50], data[:, :, 50], data_res[:, :, 50], data_rounded[:, :, 50]),
+                   titles=["gt", "data", "gm solution", "rounded"],
+                   interpolation="nearest")
         import sys
         raise sys.exit(0)
