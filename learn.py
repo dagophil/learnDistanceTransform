@@ -7,6 +7,9 @@ import numpy
 import matplotlib.pyplot as plt
 import logging as log
 import loaddata
+import time
+import multiprocessing
+import os
 
 
 def create_dummy_feature_list():
@@ -105,52 +108,75 @@ def TESTGM(lp_data, njobs=1):
     :return:
     """
     assert isinstance(lp_data, core.LPData)
+
+    result_file_name = "scale_results.txt"
+
+    # Create a list with all scales that are tried.
     scales_un = [0.25, 0.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0]
     scales_bin = [0, 0.1, 0.2, 0.3, 0.4, 0.5]
     scales_diag_2 = [0, 0.1, 0.2, 0.3, 0.4, 0.5]
     scales_diag_3 = [0, 0.1, 0.2, 0.3, 0.4, 0.5]
     scales = [[a, b, c, d] for a in scales_un for b in scales_bin for c in scales_diag_2 for d in scales_diag_3]
 
-    from time import strftime
-
+    # Each process takes one scale, builds the graphical model and computes the rand index.
     def worker(qu_in, qu_out):
         while True:
             i, s = qu_in.get()
             r = lp_data.build_gm_dists(scale_un=s[0], scale_bin=s[1], scale_diag_2=s[2], scale_diag_3=s[3])
-            print "[%s] Score %f for the scales" % (strftime("%H:%M:%S"), r), s
-            qu_out.put((i, r))
+            print "[%s] Score %f for the scales" % (time.strftime("%H:%M:%S"), r), s
+            qu_out.put((i, s, r))
             qu_in.task_done()
 
-    from multiprocessing import JoinableQueue
-    scale_queue = JoinableQueue()
+    # One process gathers the results and stores them in a file.
+    def gatherer(qu_out):
+        max_r = 0
+        if os.path.isfile(result_file_name):
+            os.remove(result_file_name)
+        while True:
+            i, s, r = qu_out.get()
+            with open(result_file_name, "a") as f:
+                f.write("[%s] Score %f for the scales %f, %f, %f, %f.\n" %
+                        (time.strftime("%H:%M:%S"), r, s[0], s[1], s[2], s[3]))
+                if r >= max_r:
+                    max_r = r
+                    print "   ---   Found new best: Score %f for scales" % r, s
+                    f.write("   ---   Last result is the new best!\n")
+            qu_out.task_done()
+
+    # Create the input queue and fill it.
+    scale_queue = multiprocessing.JoinableQueue()
     for i, s in enumerate(scales):
         scale_queue.put((i, s))
-    r_queue = JoinableQueue()
 
-    log.info("Trying different scales with %d cores." % njobs)
-    from multiprocessing import Process
-    process_list = []
-    for i in xrange(njobs):
-        p = Process(target=worker, args=(scale_queue, r_queue))
+    # Create the output queue.
+    r_queue = multiprocessing.JoinableQueue()
+
+    # Create and start the worker processes.
+    print "Trying different scales with %d cores." % njobs
+    print "Note: One additional core is used to gather the results and write them into a file."
+    process_list = [multiprocessing.Process(target=worker, args=(scale_queue, r_queue))
+                    for _ in xrange(njobs)]
+    for p in process_list:
         p.daemon = True
         p.start()
-        process_list.append(p)
 
+    # Create and start the process that gathers the results.
+    process_gatherer = multiprocessing.Process(target=gatherer, args=(r_queue,))
+    process_gatherer.daemon = True
+    process_gatherer.start()
+
+    # Wait until all scales are processed and terminate the worker processes.
     scale_queue.join()
-    r_queue.put("STOP")
     for p in process_list:
         p.terminate()
         p.join()
 
-    max_r = 0
-    max_i = 0
-    for i, r in iter(r_queue.get, "STOP"):
-        if r >= max_r:
-            max_r = r
-            max_i = i
+    # Wait until all results are stored and terminate the gatherer process.
+    r_queue.join()
+    process_gatherer.terminate()
+    process_gatherer.join()
 
-    best_a, best_b, best_c, best_d = scales[max_i]
-    print "Best rand score is %f with the scales %f, %f, %f, %f" % (max_r, best_a, best_b, best_c, best_d)
+    print "Output has been stored in", result_file_name
 
 
 def build_distance_gm(data):
