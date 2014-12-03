@@ -98,6 +98,61 @@ def TESTCOMPARE(lp_data):
                interpolation="nearest")
 
 
+def TESTGM(lp_data, njobs=1):
+    """
+
+    :param lp_data:
+    :return:
+    """
+    assert isinstance(lp_data, core.LPData)
+    scales_un = [0.25, 0.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0]
+    scales_bin = [0, 0.1, 0.2, 0.3, 0.4, 0.5]
+    scales_diag_2 = [0, 0.1, 0.2, 0.3, 0.4, 0.5]
+    scales_diag_3 = [0, 0.1, 0.2, 0.3, 0.4, 0.5]
+    scales = [[a, b, c, d] for a in scales_un for b in scales_bin for c in scales_diag_2 for d in scales_diag_3]
+
+    from time import strftime
+
+    def worker(qu_in, qu_out):
+        while True:
+            i, s = qu_in.get()
+            r = lp_data.build_gm_dists(scale_un=s[0], scale_bin=s[1], scale_diag_2=s[2], scale_diag_3=s[3])
+            print "[%s] Score %f for the scales" % (strftime("%H:%M:%S"), r), s
+            qu_out.put((i, r))
+            qu_in.task_done()
+
+    from multiprocessing import JoinableQueue
+    scale_queue = JoinableQueue()
+    for i, s in enumerate(scales):
+        scale_queue.put((i, s))
+    r_queue = JoinableQueue()
+
+    log.info("Trying different scales with %d cores." % njobs)
+    from multiprocessing import Process
+    process_list = []
+    for i in xrange(njobs):
+        p = Process(target=worker, args=(scale_queue, r_queue))
+        p.daemon = True
+        p.start()
+        process_list.append(p)
+
+    scale_queue.join()
+    r_queue.put("STOP")
+    for p in process_list:
+        p.terminate()
+        p.join()
+
+    max_r = 0
+    max_i = 0
+    for i, r in iter(r_queue.get, "STOP"):
+        if r >= max_r:
+            max_r = r
+            max_i = i
+
+    best_a, best_b, best_c, best_d = scales[max_i]
+    print "Best rand score is %f with the scales %f, %f, %f, %f" % (max_r, best_a, best_b, best_c, best_d)
+
+
 def build_distance_gm(data):
     """Build a graphical model to enhance the predicted distance transform.
 
@@ -166,7 +221,7 @@ def main():
     allowed_workflows = ["clean", "compute_train", "compute_test", "compute_dists_train", "compute_dists_test",
                          "load_train", "load_test", "load_dists_train", "load_dists_test", "load_all",
                          "learn_dists", "predict", "load_pred", "build_gm_dists",
-                         "TESThysteresis", "TESTcompare"]
+                         "TESThysteresis", "TESTcompare", "TESTgm"]
     for w in args.workflow:
         if w not in allowed_workflows:
             raise Exception("Unknown workflow: %s" % w)
@@ -218,6 +273,9 @@ def main():
         elif w == "TESTcompare":
             # TODO: Is this workflow still needed?
             TESTCOMPARE(lp_data)
+        elif w == "TESTgm":
+            # TODO: Is this workflow still needed?
+            TESTGM(lp_data, njobs=args.jobs)
         else:
             raise Exception("Unknown workflow: %s" % w)
 

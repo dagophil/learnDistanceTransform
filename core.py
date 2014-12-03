@@ -5,6 +5,7 @@ import skneuro.learning
 from sklearn.ensemble import RandomForestRegressor
 import logging as log
 import opengm
+from sklearn.metrics import adjusted_rand_score
 
 
 def round_to_nearest(arr, l):
@@ -575,16 +576,25 @@ class LPData(object):
         data_res = icm_solver.arg()
         data_res = data_res.reshape(sh)
 
-        # Replace the labels by the distance transform values.
-        data_res = numpy.array(allowed_vals)[data_res]
-        data_rounded = numpy.array(allowed_vals)[data_arg]
+        # Find rand score.
+        log.info("Computing rand score.")
+        test_y_arg = round_to_nearest_arg(test_y, allowed_vals)
+        r_score = adjusted_rand_score(test_y_arg.flatten(), data_res.flatten())
+        log.info("The rand score is %f" % r_score)
 
-        from learn import show_plots
-        gt = self.get_test_y("dists").reshape(sh)
-        gt[gt > 5.0] = 5.0
-        show_plots((2, 2),
-                   (gt[:, :, 50], data[:, :, 50], data_res[:, :, 50], data_rounded[:, :, 50]),
-                   titles=["gt", "data", "gm solution", "rounded"],
-                   interpolation="nearest")
-        import sys
-        raise sys.exit(0)
+
+        # TODO: Return something else...
+        return r_score
+
+        # # Replace the labels by the distance transform values.
+        # data_res = numpy.array(allowed_vals)[data_res]
+        # data_rounded = numpy.array(allowed_vals)[data_arg]
+        #
+        # # Show some result plot.
+        # from learn import show_plots
+        # gt = self.get_test_y("dists").reshape(sh)
+        # gt[gt > 5.0] = 5.0
+        # show_plots((2, 2),
+        #            (gt[:, :, 50], data[:, :, 50], data_res[:, :, 50], data_rounded[:, :, 50]),
+        #            titles=["gt", "data", "gm solution", "rounded"],
+        #            interpolation="nearest")
