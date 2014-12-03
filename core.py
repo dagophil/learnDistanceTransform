@@ -432,7 +432,7 @@ class LPData(object):
 
         return pred
 
-    def build_gm_dists(self):
+    def build_gm_dists(self, scale_un=2.5, scale_bin=0.4, scale_diag_2=0.4, scale_diag_3=0.4):
         """Build a graphical model from the predicted data.
 
         :return: graphical model
@@ -460,7 +460,6 @@ class LPData(object):
 
         # Create the unaries.
         log.info("Adding unaries.")
-        scale_un = 2.5
         unary_matrix = numpy.zeros((num_labels, num_labels))
         for i in xrange(num_labels):
             dist = numpy.array([numpy.abs(allowed_vals[i] - v) for v in allowed_vals])
@@ -470,7 +469,6 @@ class LPData(object):
 
         # Create and add the grid binary functions.
         log.info("Adding grid binaries.")
-        scale = 0.4
         regularizer = numpy.zeros((num_labels, num_labels))
         for i in xrange(num_labels):
             for j in xrange(num_labels):
@@ -483,7 +481,7 @@ class LPData(object):
                     penalty = 0.3
                 else:  # dist > 1
                     penalty = 2.0
-                regularizer[i, j] = scale * penalty
+                regularizer[i, j] = scale_bin * penalty
         regularizer[0, 0] = 0
         regularizer[num_labels-1, num_labels-1] = 0
 
@@ -493,7 +491,6 @@ class LPData(object):
 
         # Create and add the 2-diagonal binary functions.
         log.info("Adding 2-diagonal binaries.")
-        scale_2 = 0.4
         regularizer_2 = numpy.zeros((num_labels, num_labels))
         for i in xrange(num_labels):
             for j in xrange(num_labels):
@@ -506,14 +503,14 @@ class LPData(object):
                     penalty = 0.3
                 else:  # dist > sqrt(2)
                     penalty = 2 * allowed_vals[2]
-                regularizer_2[i, j] = scale_2 * penalty
+                regularizer_2[i, j] = scale_diag_2 * penalty
         regularizer_2[0, 0] = 0
         regularizer_2[num_labels-1, num_labels-1] = 0
         regularizer_2_id = gm.addFunction(regularizer_2)
         for z in xrange(sh[2]):
             for y in xrange(sh[1]):
                 for x in xrange(sh[0]):
-                    # Add the three 2-diagonals.
+                    # Add the six 2-diagonals.
                     var0_index = numpy.ravel_multi_index((x, y, z), sh)
                     if x+1 < sh[0] and y+1 < sh[1]:
                         var1_index = numpy.ravel_multi_index((x+1, y+1, z), sh)
@@ -524,9 +521,51 @@ class LPData(object):
                     if y+1 < sh[1] and z+1 < sh[2]:
                         var1_index = numpy.ravel_multi_index((x, y+1, z+1), sh)
                         gm.addFactor(regularizer_2_id, [int(var0_index), int(var1_index)])
+                    if x > 0 and y+1 < sh[1]:
+                        var1_index = numpy.ravel_multi_index((x-1, y+1, z), sh)
+                        gm.addFactor(regularizer_2_id, [int(var1_index), int(var0_index)])
+                    if x > 0 and z+1 < sh[2]:
+                        var1_index = numpy.ravel_multi_index((x-1, y, z+1), sh)
+                        gm.addFactor(regularizer_2_id, [int(var1_index), int(var0_index)])
+                    if y > 0 and z+1 < sh[2]:
+                        var1_index = numpy.ravel_multi_index((x, y-1, z+1), sh)
+                        gm.addFactor(regularizer_2_id, [int(var1_index), int(var0_index)])
 
-
-
+        # Create and add the 3-diagonal binary functions.
+        log.info("Adding 3-diagonal binaries.")
+        regularizer_3 = numpy.zeros((num_labels, num_labels))
+        for i in xrange(num_labels):
+            for j in xrange(num_labels):
+                dist = numpy.abs(allowed_vals[j] - allowed_vals[i])
+                if dist == 0:
+                    penalty = 0.5
+                elif dist < 0.95 * allowed_vals[3]:
+                    penalty = 0.4
+                elif dist < 1.05 * allowed_vals[3]:
+                    penalty = 0.3
+                else:  # dist > sqrt(3)
+                    penalty = 2 * allowed_vals[3]
+                regularizer_3[i, j] = scale_diag_3 * penalty
+        regularizer_3[0, 0] = 0
+        regularizer_3[num_labels-1, num_labels-1] = 0
+        regularizer_3_id = gm.addFunction(regularizer_3)
+        for z in xrange(sh[2]):
+            for y in xrange(sh[1]):
+                for x in xrange(sh[0]):
+                    # Add the four 3-diagonals.
+                    var0_index = numpy.ravel_multi_index((x, y, z), sh)
+                    if x+1 < sh[0] and y+1 < sh[1] and z+1 < sh[2]:
+                        var1_index = numpy.ravel_multi_index((x+1, y+1, z+1), sh)
+                        gm.addFactor(regularizer_3_id, [int(var0_index), int(var1_index)])
+                    if x > 0 and y+1 < sh[1] and z+1 < sh[2]:
+                        var1_index = numpy.ravel_multi_index((x-1, y+1, z+1), sh)
+                        gm.addFactor(regularizer_3_id, [int(var1_index), int(var0_index)])
+                    if x > 0 and y > 0 and z+1 < sh[2]:
+                        var1_index = numpy.ravel_multi_index((x-1, y-1, z+1), sh)
+                        gm.addFactor(regularizer_3_id, [int(var1_index), int(var0_index)])
+                    if x+1 < sh[0] and y > 0 and z+1 < sh[2]:
+                        var1_index = numpy.ravel_multi_index((x+1, y-1, z+1), sh)
+                        gm.addFactor(regularizer_3_id, [int(var0_index), int(var1_index)])
 
         # Solve the graphical model.
         # TODO: Try other solvers: fastpd // alpha expansion // icm

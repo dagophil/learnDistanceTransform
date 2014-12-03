@@ -120,7 +120,21 @@ def process_command_line():
     parser.add_argument("-v", "--verbose", action="store_true", default=False, help="print verbose output")
     parser.add_argument("--cap", type=float, default=0,
                         help="maximum value of distance transform (ignored if 0), all larger values will be set to this")
-    return parser.parse_args()
+    parser.add_argument("--weights", type=float, nargs='*', help="weights for the diagonals in the graphical model")
+    args = parser.parse_args()
+    if args.weights is None:
+        args.weights = [2.5, 0.4, 0.4, 0.4]
+    elif len(args.weights) == 0:
+        args.weights = [2.5, 0.4, 0.4, 0.4]
+    elif len(args.weights) == 1:
+        args.weights += [0.4, 0.4, 0.4]
+    elif len(args.weights) == 2:
+        args.weights += [0.4, 0.4]
+    elif len(args.weights) == 3:
+        args.weights += [0.4]
+    elif len(args.weights) > 4:
+        raise Exception("Number of weights must be less or equal to 4.")
+    return args
 
 
 def main():
@@ -193,7 +207,10 @@ def main():
             lp_data.pred_path = "cache/pred_cap_lam_01.h5"
             lp_data.pred_cap = 5
         elif w == "build_gm_dists":
-            gm = lp_data.build_gm_dists()
+            gm = lp_data.build_gm_dists(scale_un=args.weights[0],
+                                        scale_bin=args.weights[1],
+                                        scale_diag_2=args.weights[2],
+                                        scale_diag_3=args.weights[3])
             # TODO: What to do with the graphical model?
         elif w == "TESThysteresis":
             # TODO: Is this workflow still needed?
