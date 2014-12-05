@@ -179,13 +179,13 @@ def TESTGM(lp_data, njobs=1):
     print "Output has been stored in", result_file_name
 
 
-def build_distance_gm(data):
+def build_distance_gm(lp_data):
     """Build a graphical model to enhance the predicted distance transform.
 
     :param data: the predicted distance transform
     :return: graphical model
     """
-    print data.shape
+    # r = lp_data.build_gm_dists(scale_un=s[0], scale_bin=s[1], scale_diag_2=s[2], scale_diag_3=s[3])
     raise NotImplementedError
 
 

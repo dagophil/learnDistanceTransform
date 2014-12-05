@@ -571,9 +571,11 @@ class LPData(object):
         # Solve the graphical model.
         # TODO: Try other solvers: fastpd // alpha expansion // icm
         log.info("Solving the gm.")
-        icm_solver = opengm.inference.Icm(gm=gm)
-        icm_solver.infer()
-        data_res = icm_solver.arg()
+        # inf_solver = opengm.inference.Icm(gm=gm)
+        # inf_solver = opengm.inference.AlphaExpansion(gm=gm)
+        inf_solver = opengm.inference.BeliefPropagation(gm=gm)
+        inf_solver.infer()
+        data_res = inf_solver.arg()
         data_res = data_res.reshape(sh)
 
         # Find rand score.
@@ -582,19 +584,17 @@ class LPData(object):
         r_score = adjusted_rand_score(test_y_arg.flatten(), data_res.flatten())
         log.info("The rand score is %f" % r_score)
 
+        # Replace the labels by the distance transform values.
+        data_res = numpy.array(allowed_vals)[data_res]
+        data_rounded = numpy.array(allowed_vals)[data_arg]
 
-        # TODO: Return something else...
-        return r_score
+        # TODO: Return something useful
 
-        # # Replace the labels by the distance transform values.
-        # data_res = numpy.array(allowed_vals)[data_res]
-        # data_rounded = numpy.array(allowed_vals)[data_arg]
-        #
-        # # Show some result plot.
-        # from learn import show_plots
-        # gt = self.get_test_y("dists").reshape(sh)
-        # gt[gt > 5.0] = 5.0
-        # show_plots((2, 2),
-        #            (gt[:, :, 50], data[:, :, 50], data_res[:, :, 50], data_rounded[:, :, 50]),
-        #            titles=["gt", "data", "gm solution", "rounded"],
-        #            interpolation="nearest")
+        # Show some result plot.
+        from learn import show_plots
+        gt = self.get_test_y("dists").reshape(sh)
+        gt[gt > 5.0] = 5.0
+        show_plots((2, 2),
+                   (gt[:, :, 50], data[:, :, 50], data_res[:, :, 50], data_rounded[:, :, 50]),
+                   titles=["gt", "prediction", "gm solution", "rounded prediction"],
+                   interpolation="nearest")
